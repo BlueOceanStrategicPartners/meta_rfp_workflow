@@ -1,0 +1,11 @@
+# faster-whisper (recommended): pip install faster-whisper  (~500MB small.en, good English)
+faster-whisper>=1.1.0
+
+# OmniASR ONNX path: pip install "fast-omniasr[onnx,hub]"
+# GPU: pip install onnxruntime-gpu  (match your CUDA version)
+fast-omniasr>=0.3.0
+onnxruntime>=1.19
+
+# Torch path (fallback): OMNIASR_RUNTIME=torch
+# pip install torch --index-url https://download.pytorch.org/whl/cpu
+# transformers sentencepiece accelerate

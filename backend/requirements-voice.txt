@@ -1,0 +1,7 @@
+# Meta SeamlessM4T v2 — required for production agent speech synthesis
+torch>=2.2
+torchaudio>=2.2
+transformers>=4.44
+accelerate>=0.33
+sentencepiece>=0.2
+soundfile>=0.12

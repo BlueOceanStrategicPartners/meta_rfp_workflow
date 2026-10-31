@@ -1,0 +1,31 @@
+---
+description: Local dev servers — auto-reload and when the agent restarts without asking
+globs:
+  - hospitality-rfp-engine/**/*
+alwaysApply: false
+---
+
+# Dev servers (hospitality-rfp-engine)
+
+## Django autoreload (default)
+
+- Start backend with `scripts/dev-backend.ps1` or `python manage.py runserver 127.0.0.1:8000` **without** `--noreload`.
+- Daphne’s `runserver` uses Django **StatReloader**; Python changes under `backend/apps/` and `backend/config/` reload the process automatically.
+- Do **not** run bare `daphne config.asgi:application` for day-to-day dev (no file watcher).
+
+## When the agent restarts
+
+- **Do not ask** the user to restart Django after normal Python/template edits if `runserver` is already running with autoreload.
+- **Do restart** (kill port 8000 / 5173 and rerun dev scripts) when:
+  - `.env` changed (not watched by StatReloader),
+  - new pip dependencies were installed,
+  - autoreload failed or the server is down,
+  - the user explicitly asked to restart both servers.
+- **Frontend**: Vite HMR handles TS/React; hard refresh only if the user still sees stale UI.
+
+## Commands
+
+```powershell
+.\hospitality-rfp-engine\scripts\dev-backend.ps1
+.\hospitality-rfp-engine\scripts\dev-frontend.ps1
+```
