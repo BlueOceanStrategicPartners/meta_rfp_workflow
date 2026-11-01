@@ -65,12 +65,15 @@ class RenderProposalView(APIView):
             return Response({"detail": "No default template"}, status=400)
         quote = DynamicPricingQuote.objects.filter(rfp=rfp).order_by("-created_at").first()
         cards = rfp.active_ui_cards_json or {}
-        html = template.html_markup
+        from apps.designer_studio.services import compile_template
+        from apps.designer_studio.venue_map_context import default_map_embed_for_proposal
+
+        map_embed = default_map_embed_for_proposal() or ""
         replacements = {
             "{{client_name}}": str(cards.get("event_overview", {}).get("company_name", "")),
             "{{event_dates}}": f"{cards.get('event_overview', {}).get('check_in_date')} - {cards.get('event_overview', {}).get('check_out_date')}",
             "{{verified_room_blocks}}": str(cards.get("room_block", {})),
-            "{{selected_map_svg}}": "",
+            "{{selected_map_svg}}": map_embed,
             "{{meeting_space_specs}}": str(cards.get("meeting_space", {})),
             "{{xgboost_quote_breakdown}}": str(
                 {
@@ -82,11 +85,17 @@ class RenderProposalView(APIView):
             "{{negotiated_concessions}}": "",
             "{{cta_accept_button}}": '<button type="button">Accept Proposal</button>',
         }
-        for token, value in replacements.items():
-            html = html.replace(token, value)
+        from apps.designer_studio.services import compile_template
+
+        compiled = compile_template(
+            template.html_markup,
+            template.css_stylesheet,
+            js_script=template.js_script,
+            replacements=replacements,
+        )
         rendered = RenderedProposal.objects.update_or_create(
             rfp=rfp,
-            defaults={"template": template, "compiled_proposal_html": html},
+            defaults={"template": template, "compiled_proposal_html": compiled},
         )[0]
         from apps.rfp_debate.models import RFPStatus
 

@@ -38,7 +38,9 @@ class ArbiterOrchestrator:
             DebateIterationLog.objects.create(
                 rfp=rfp,
                 iteration_number=iteration,
-                extractor_model_id=settings.META_MODEL_SPARK,
+                extractor_model_id=(
+                    settings.META_MODEL_WONDER if iteration == 1 else settings.META_MODEL_SPARK
+                ),
                 extractor_output_json=extraction.model_dump(mode="json"),
                 critic_model_id=settings.META_MODEL_SPARK,
                 discrepancy_flags_json=[f.model_dump() for f in critique.discrepancy_flags],

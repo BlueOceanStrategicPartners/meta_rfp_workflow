@@ -1,7 +1,7 @@
 import uuid
 
 from django.conf import settings
-from django.db import models
+from django.db import models, transaction
 
 
 class SpaceType(models.TextChoices):
@@ -47,6 +47,12 @@ class InteractiveVenueMap(models.Model):
     title = models.CharField(max_length=255)
     source_image_file = models.FileField(upload_to="venue_maps/", blank=True)
     generated_html_svg = models.TextField(blank=True)
+    html_markup = models.TextField(blank=True)
+    css_stylesheet = models.TextField(blank=True)
+    js_script = models.TextField(blank=True)
+    chat_history_json = models.JSONField(default=list, blank=True)
+    revision_history_json = models.JSONField(default=list, blank=True)
+    is_default = models.BooleanField(default=False)
     is_verified = models.BooleanField(default=False)
     verified_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -55,9 +61,25 @@ class InteractiveVenueMap(models.Model):
         blank=True,
         related_name="verified_maps",
     )
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="venue_maps_authored",
+    )
     version = models.PositiveIntegerField(default=1)
     vectorization_confidence = models.FloatField(default=0.0)
     created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def save(self, *args, **kwargs):
+        with transaction.atomic():
+            if self.is_default:
+                InteractiveVenueMap.objects.filter(is_default=True).exclude(pk=self.pk).update(
+                    is_default=False
+                )
+            super().save(*args, **kwargs)
 
     def __str__(self) -> str:
         return self.title

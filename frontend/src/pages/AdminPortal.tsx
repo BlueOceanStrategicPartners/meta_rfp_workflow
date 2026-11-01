@@ -14,7 +14,7 @@ export default function AdminPortal() {
   const { debates } = useDebateObservatory();
 
   return (
-    <div className="min-h-screen pt-16 p-6 space-y-6">
+    <div className="h-full min-h-0 overflow-y-auto p-6 space-y-6">
       <h1 className="text-2xl">Admin Command Center</h1>
       <div className="grid md:grid-cols-3 gap-3">
         {MODULES.map((name) => (

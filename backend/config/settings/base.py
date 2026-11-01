@@ -1,5 +1,6 @@
 """Shared Django settings."""
 import os
+from datetime import timedelta
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -82,12 +83,20 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
+        "rest_framework_simplejwt.authentication.JWTAuthentication",
         "rest_framework.authentication.SessionAuthentication",
         "rest_framework.authentication.BasicAuthentication",
     ],
     "DEFAULT_PERMISSION_CLASSES": [
         "rest_framework.permissions.IsAuthenticated",
     ],
+}
+
+SIMPLE_JWT = {
+    "ACCESS_TOKEN_LIFETIME": timedelta(hours=1),
+    "REFRESH_TOKEN_LIFETIME": timedelta(days=14),
+    "ROTATE_REFRESH_TOKENS": True,
+    "UPDATE_LAST_LOGIN": True,
 }
 
 CORS_ALLOWED_ORIGINS = os.getenv(
@@ -117,6 +126,7 @@ CHANNEL_LAYERS = {
 META_MODEL_API_KEY = os.getenv("META_MODEL_API_KEY") or os.getenv("LLM_API_KEY", "")
 META_MODEL_API_BASE = os.getenv("META_MODEL_API_BASE", "https://api.meta.ai/v1")
 META_MODEL_SPARK = os.getenv("META_MODEL_SPARK", "muse-spark-1.3")
+META_MODEL_WONDER = os.getenv("META_MODEL_WONDER", "muse-wonder")
 USE_FIXTURE_DEBATE = os.getenv("USE_FIXTURE_DEBATE", "false").lower() == "true"
 
 # SeamlessM4T v2 — compulsory voice assistant TTS (Meta Seamless Communication)

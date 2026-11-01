@@ -5,6 +5,7 @@ import ComposerDock from "../components/composer/ComposerDock";
 import WindowDragAndDropOverlay from "../components/composer/WindowDragAndDropOverlay";
 import AgentCardDeck from "../components/generative_ui/AgentCardDeck";
 import SidePanelVenueMap from "../components/generative_ui/SidePanelVenueMap";
+import VenueMapToggleButton from "../components/generative_ui/VenueMapToggleButton";
 import ProposalTemplateRenderer from "../components/generative_ui/ProposalTemplateRenderer";
 import VoiceAgentSubtitles, { type CaptionLine } from "../components/voice/VoiceAgentSubtitles";
 import { useVoiceOrbAudio } from "../hooks/useVoiceOrbAudio";
@@ -12,48 +13,20 @@ import { useMuseVoiceTranscribe } from "../hooks/useMuseVoiceTranscribe";
 import { useBidirectionalAgentUI } from "../hooks/useBidirectionalAgentUI";
 import { unlockBrowserAudio, primeAudioSync, useSeamlessM4TV2 } from "../hooks/useSeamlessM4TV2";
 import { cardsHaveExtraction, quickVoiceAck, shouldStartAutonomousPipeline } from "../lib/rfpFlow";
-import { fetchRfpCards, waitForRfpCards } from "../lib/rfpApi";
+import { createRfpSession, fetchRfpCards, waitForRfpCards } from "../lib/rfpApi";
 import { streamAssistantReply } from "../lib/voiceChatStream";
-
-const DEFAULT_SVG =
-  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300"><polygon id="zone-grand" points="20,20 380,20 380,280 20,280" fill="rgba(0,180,255,0.15)" stroke="#0af"/></svg>';
+import { fetchPublishedVenueMap, type MapLocation } from "../lib/mapStudioApi";
 
 function newCaptionId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-}
-
-type CreateSessionResult = {
-  id: string;
-  voiceIntro: string;
-  cards: Record<string, unknown>;
-};
-
-async function createRfpSession(
-  sourceText: string,
-  runDebate: boolean,
-): Promise<CreateSessionResult | null> {
-  const res = await fetch("/api/rfp/", {
-    method: "POST",
-    credentials: "include",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      source_document_text: sourceText.slice(0, 5000) || "Corporate RFP",
-      run_debate: runDebate,
-    }),
-  });
-  if (!res.ok) return null;
-  const data = await res.json();
-  return {
-    id: String(data.id),
-    voiceIntro: String(data.voice_intro || ""),
-    cards: (data.active_ui_cards_json as Record<string, unknown>) || {},
-  };
 }
 
 export default function ClientWorkspace() {
   const [composerOpen, setComposerOpen] = useState(true);
   const [dragging, setDragging] = useState(false);
   const [mapOpen, setMapOpen] = useState(false);
+  const [publishedMapHtml, setPublishedMapHtml] = useState("");
+  const [publishedLocations, setPublishedLocations] = useState<MapLocation[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const sessionIdRef = useRef<string | null>(null);
   sessionIdRef.current = sessionId;
@@ -222,7 +195,7 @@ export default function ClientWorkspace() {
       userMessage: string,
       runDebate: boolean,
       onProgress?: (message: string) => void,
-    ): Promise<{ id: string; created: boolean; voiceIntro?: string } | null> => {
+    ): Promise<{ id: string; created: boolean; voiceIntro?: string } | { error: string }> => {
       onProgress?.("Checking your RFP session…");
       if (sessionIdRef.current) {
         const hydrated = await waitForRfpCards(sessionIdRef.current);
@@ -233,7 +206,7 @@ export default function ClientWorkspace() {
       }
       onProgress?.("Creating your draft and running venue analysis…");
       const created = await createRfpSession(userMessage, runDebate);
-      if (!created) return null;
+      if (!created.ok) return { error: created.message };
       setSessionId(created.id);
       sessionIdRef.current = created.id;
       if (runDebate) {
@@ -256,6 +229,16 @@ export default function ClientWorkspace() {
     },
     [setCards],
   );
+
+  useEffect(() => {
+    fetchPublishedVenueMap()
+      .then((data) => {
+        if (!data) return;
+        setPublishedMapHtml(data.compiled_html);
+        setPublishedLocations(data.locations || []);
+      })
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (!sessionId || cardsHaveExtraction(cards)) return;
@@ -297,8 +280,8 @@ export default function ClientWorkspace() {
         if (startPipeline) {
           touchAgentLine(quickVoiceAck(userMessage));
           const session = await ensureSession(userMessage, true, (msg) => touchAgentLine(msg));
-          if (!session) {
-            setStatusHint("Could not start RFP session. Check backend on port 8000.");
+          if ("error" in session) {
+            setStatusHint(session.error);
             if (voiceModeRef.current) {
               void resumeListeningRef.current();
             }
@@ -419,7 +402,7 @@ export default function ClientWorkspace() {
       const text = await files[0]?.text().catch(() => "MISMATCH_FIXTURE");
       appendCaption("user", text?.slice(0, 200) || "Uploaded RFP document");
       const created = await createRfpSession(text || "Corporate RFP", true);
-      if (created) {
+      if (created.ok) {
         setSessionId(created.id);
         sessionIdRef.current = created.id;
         const deck = cardsHaveExtraction(created.cards)
@@ -434,6 +417,8 @@ export default function ClientWorkspace() {
           const captionId = appendCaption("agent", created.voiceIntro, "pending");
           await speakOnce(created.voiceIntro, captionId, { mandatory: true });
         }
+      } else {
+        setStatusHint(created.message);
       }
     },
     [appendCaption, setCards, speakOnce, synthesizePulse],
@@ -452,6 +437,9 @@ export default function ClientWorkspace() {
 
   const showCardDeck = sessionId && cardsHaveExtraction(cards);
 
+  const subtitleBandActive =
+    captions.length > 0 || thinking || agentSpeaking || progressText != null;
+
   const enableVoice = useCallback(async () => {
     await unlockBrowserAudio();
     const pending = pendingSpeechRef.current;
@@ -467,13 +455,17 @@ export default function ClientWorkspace() {
 
   return (
     <div
-      className="relative min-h-screen pt-12 overflow-y-auto"
+      className="relative isolate h-full min-h-0 overflow-y-auto"
       onDragEnter={() => setDragging(true)}
       onDragLeave={() => setDragging(false)}
     >
       <ParticleConstellation />
-      <div className="flex">
-        <main className="flex-1 flex flex-col items-center justify-center min-h-[calc(100vh-6rem)] pb-36 w-full">
+      <div className="relative z-10 flex min-h-full">
+        <main
+          className={`flex-1 flex flex-col items-center justify-center min-h-[calc(100vh-6rem)] w-full transition-[padding] duration-300 ${
+            subtitleBandActive ? "pb-56" : "pb-40"
+          }`}
+        >
           <CentralVoiceOrb
             levels={micLevels}
             debateRings={debateRings}
@@ -503,19 +495,16 @@ export default function ClientWorkspace() {
               Stop speaking
             </button>
           )}
-          <button
-            type="button"
-            className="mt-4 text-sm text-cyan-300 underline"
-            onClick={() => setMapOpen((v) => !v)}
-          >
-            Toggle venue map
-          </button>
+          <VenueMapToggleButton open={mapOpen} onToggle={() => setMapOpen((v) => !v)} />
         </main>
       </div>
       {showCardDeck && <AgentCardDeck cards={cards} onSubmit={submitCardMutation} />}
       <SidePanelVenueMap
         open={mapOpen}
-        svgMarkup={DEFAULT_SVG}
+        onClose={() => setMapOpen(false)}
+        anchorBottom={composerOpen ? "11.25rem" : "7.5rem"}
+        compiledHtml={publishedMapHtml}
+        locations={publishedLocations}
         highlights={mapHighlights}
         onSelectZone={() => synthesizePulse()}
       />

@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import threading
+
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
 from celery import shared_task
 from django.utils import timezone
+
+from django.conf import settings
 
 from apps.core.exceptions import MaxDebateIterationsExceededError
 from apps.dynamic_pricing.services import compute_dynamic_quote
@@ -35,6 +39,22 @@ def _apply_quote_to_cards(rfp: RFPSubmission, quote) -> None:
     rfp.active_ui_cards_json = cards
     rfp.status = RFPStatus.NEGOTIATING
     rfp.save(update_fields=["active_ui_cards_json", "status", "updated_at"])
+
+
+def enqueue_debate_pipeline(rfp_id: str) -> None:
+    """
+    Local dev uses CELERY_TASK_ALWAYS_EAGER, which would block HTTP until debate finishes.
+    Run the pipeline in a daemon thread so POST /api/rfp/ returns immediately.
+    """
+    if getattr(settings, "CELERY_TASK_ALWAYS_EAGER", False):
+        threading.Thread(
+            target=run_debate_pipeline,
+            args=(rfp_id,),
+            daemon=True,
+            name=f"debate-{rfp_id[:8]}",
+        ).start()
+        return
+    run_debate_pipeline.delay(rfp_id)
 
 
 @shared_task

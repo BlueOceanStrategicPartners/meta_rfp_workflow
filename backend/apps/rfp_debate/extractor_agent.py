@@ -17,8 +17,12 @@ class ExtractorAgent:
         use_spark: bool = False,
         targeted_fields: list[str] | None = None,
     ) -> RFPExtractionPayload:
-        model_id = settings.META_MODEL_SPARK
-        effort = None
+        if use_spark or targeted_fields:
+            model_id = settings.META_MODEL_SPARK
+            effort = None
+        else:
+            model_id = settings.META_MODEL_WONDER
+            effort = "max"
         prompt = (
             "Extract RFP fields as JSON matching RFPExtractionPayload schema. "
             "Every field must include source_citation with page_number and verbatim_quote."

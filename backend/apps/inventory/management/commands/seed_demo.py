@@ -1,8 +1,15 @@
 from django.core.management.base import BaseCommand
 
 from apps.designer_studio.models import ProposalTemplate, REQUIRED_PLACEHOLDERS
-from apps.accounts_rbac.models import CustomUser, UserRole
-from apps.inventory.models import HistoricalOccupancy, SpaceInventory, VenueProperty
+from apps.accounts_rbac.demo_accounts import ensure_studio_demo_user
+from apps.inventory.models import (
+    HistoricalOccupancy,
+    InteractiveVenueMap,
+    SpaceInventory,
+    VenueMapZone,
+    VenueProperty,
+)
+from apps.rfp_debate.meta_client import MetaModelClient
 
 
 class Command(BaseCommand):
@@ -40,13 +47,7 @@ class Command(BaseCommand):
                     "revpar": 140 + i * 4,
                 },
             )
-        designer, _ = CustomUser.objects.get_or_create(
-            email="designer@demo.local",
-            defaults={"username": "designer", "role": UserRole.DESIGNER},
-        )
-        if not designer.password:
-            designer.set_password("demo12345")
-            designer.save()
+        designer = ensure_studio_demo_user(reset_password=True)
         html = "".join(
             f"<div>{p}</div>" for p in REQUIRED_PLACEHOLDERS
         )
@@ -55,4 +56,29 @@ class Command(BaseCommand):
             designer=designer,
             defaults={"html_markup": html, "css_stylesheet": "body{margin:0;}", "is_default": True},
         )
+        fixture = MetaModelClient._map_fixture_interactive("")
+        venue_map, _ = InteractiveVenueMap.objects.update_or_create(
+            title="Meta Grand Floorplan",
+            property=prop,
+            defaults={
+                "html_markup": fixture["html_markup"],
+                "css_stylesheet": fixture["css_stylesheet"],
+                "js_script": fixture["js_script"],
+                "is_default": True,
+                "created_by": designer,
+            },
+        )
+        for loc in fixture["locations"]:
+            VenueMapZone.objects.update_or_create(
+                venue_map=venue_map,
+                svg_element_id=loc["id"],
+                defaults={
+                    "zone_label": loc["label"],
+                    "display_metadata_json": {
+                        "description": loc["description"],
+                        "image_urls": loc.get("image_urls") or [],
+                    },
+                    "updated_by_agent": True,
+                },
+            )
         self.stdout.write(self.style.SUCCESS("Seed complete"))

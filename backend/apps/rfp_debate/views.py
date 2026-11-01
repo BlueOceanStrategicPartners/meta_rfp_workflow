@@ -6,7 +6,7 @@ from apps.accounts_rbac.permissions import IsClientRole
 
 from .models import RFPSubmission, RFPStatus
 from .serializers import RFPSubmissionSerializer
-from .tasks import run_debate_pipeline
+from .tasks import enqueue_debate_pipeline, run_debate_pipeline
 from .voice_intro import build_voice_intro_for_rfp
 from .card_normalize import normalize_cards_for_ui
 
@@ -37,7 +37,7 @@ class RFPListCreateView(generics.ListCreateAPIView):
         text = (serializer.validated_data.get("source_document_text") or "").strip()
         rfp = serializer.save(client=user, status=RFPStatus.EXTRACTING, source_document_text=text)
         if _request_run_debate(self.request):
-            run_debate_pipeline.delay(str(rfp.id))
+            enqueue_debate_pipeline(str(rfp.id))
 
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
@@ -51,6 +51,11 @@ class RFPListCreateView(generics.ListCreateAPIView):
         if _request_run_debate(request):
             partial = bool(rfp.amber_conflict_fields_json)
             intro = build_voice_intro_for_rfp(rfp, partial=partial)
+            if not intro.strip():
+                intro = (
+                    "I'm analyzing your dates and room block now — "
+                    "your summary will appear on the right in a moment."
+                )
             data["voice_intro"] = intro
         headers = self.get_success_headers(data)
         return Response(data, status=status.HTTP_201_CREATED, headers=headers)

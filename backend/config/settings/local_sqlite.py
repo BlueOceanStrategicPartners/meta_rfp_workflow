@@ -17,3 +17,10 @@ CHANNEL_LAYERS = {
 
 CELERY_TASK_ALWAYS_EAGER = os.getenv("CELERY_TASK_ALWAYS_EAGER", "true").lower() == "true"  # noqa: F405
 USE_SEAMLESS_FIXTURE = os.getenv("USE_SEAMLESS_FIXTURE", "true").lower() == "true"  # noqa: F405
+
+# SPA dev (Vite :5173 → Django :8000): session must not require HTTPS.
+SESSION_COOKIE_SECURE = False
+SESSION_COOKIE_SAMESITE = "Lax"
+CSRF_COOKIE_SECURE = False
+CSRF_COOKIE_SAMESITE = "Lax"
+SESSION_COOKIE_AGE = 60 * 60 * 24 * 14
