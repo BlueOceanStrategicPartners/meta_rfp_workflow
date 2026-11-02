@@ -24,6 +24,7 @@ type TemplateIconButtonProps = {
   active?: boolean;
   selected?: boolean;
   compact?: boolean;
+  micro?: boolean;
   children: ReactNode;
 };
 
@@ -35,6 +36,7 @@ export default function TemplateIconButton({
   active,
   selected,
   compact,
+  micro,
   children,
 }: TemplateIconButtonProps) {
   return (
@@ -48,7 +50,7 @@ export default function TemplateIconButton({
       whileHover={disabled ? undefined : { scale: 1.08, y: -1 }}
       whileTap={disabled ? undefined : { scale: 0.92 }}
       transition={{ type: "spring", stiffness: 520, damping: 28 }}
-      className={`studio-icon-btn ${compact ? "h-9 w-9 shrink-0 !flex-none" : ""} ${selected ? selectedClass : variantClass[variant]} ${active ? "ring-2 ring-amber-400/50" : ""} disabled:cursor-not-allowed disabled:opacity-40`}
+      className={`studio-icon-btn ${compact || micro ? "shrink-0 !flex-none" : ""} ${micro ? "h-7 w-7 !min-h-0 !min-w-0" : compact ? "h-9 w-9 shrink-0 !flex-none" : ""} ${selected ? selectedClass : variantClass[variant]} ${active ? "ring-2 ring-amber-400/50" : ""} disabled:cursor-not-allowed disabled:opacity-40`}
     >
       {children}
     </motion.button>
@@ -93,6 +95,33 @@ export function IconExport() {
   return (
     <svg width={ICON_SIZE} height={ICON_SIZE} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={ICON_STROKE} aria-hidden>
       <path d="M12 3v12M7 8l5-5 5 5M5 21h14" />
+    </svg>
+  );
+}
+
+export function IconMoreVertical() {
+  return (
+    <svg width={ICON_SIZE} height={ICON_SIZE} viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+      <circle cx="12" cy="5" r="1.75" />
+      <circle cx="12" cy="12" r="1.75" />
+      <circle cx="12" cy="19" r="1.75" />
+    </svg>
+  );
+}
+
+export function IconHistory() {
+  return (
+    <svg width={ICON_SIZE} height={ICON_SIZE} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={ICON_STROKE} aria-hidden>
+      <path d="M3 12a9 9 0 1 0 3-6.7" />
+      <path d="M3 4v5h5M12 7v5l3 2" />
+    </svg>
+  );
+}
+
+export function IconAgentRules({ size = ICON_SIZE }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={ICON_STROKE} aria-hidden>
+      <path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" strokeLinecap="round" />
     </svg>
   );
 }
@@ -248,6 +277,23 @@ export function IconMic() {
     <svg width={ICON_SIZE} height={ICON_SIZE} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={ICON_STROKE} aria-hidden>
       <path d="M12 14a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v5a3 3 0 0 0 3 3z" />
       <path d="M19 11a7 7 0 0 1-14 0M12 18v3" />
+    </svg>
+  );
+}
+
+export function IconClose() {
+  return (
+    <svg width={ICON_SIZE} height={ICON_SIZE} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={ICON_STROKE} aria-hidden>
+      <path d="M6 6l12 12M18 6 6 18" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+export function IconUnlinkMap() {
+  return (
+    <svg width={ICON_SIZE} height={ICON_SIZE} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={ICON_STROKE} aria-hidden>
+      <path d="M4 7h6M14 7h6M7 7v10M17 7v6" strokeLinecap="round" />
+      <path d="M3 21l18-18" strokeLinecap="round" />
     </svg>
   );
 }

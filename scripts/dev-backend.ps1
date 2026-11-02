@@ -20,5 +20,9 @@ if (Test-Path $EnvFile) {
     }
 }
 
+Write-Host "Applying pending migrations..." -ForegroundColor DarkGray
+& ".\.venv\Scripts\python.exe" manage.py migrate --noinput
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
 Write-Host "Django dev server (autoreload ON) -> http://127.0.0.1:8000" -ForegroundColor Cyan
 & ".\.venv\Scripts\python.exe" manage.py runserver 127.0.0.1:8000

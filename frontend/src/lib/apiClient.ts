@@ -45,11 +45,38 @@ async function buildRequestInit(init: RequestInit = {}): Promise<RequestInit> {
   return { ...init, headers, credentials: "include" };
 }
 
+/** Headers for XHR streaming POSTs (design agent SSE). */
+export async function getDesignerStreamPostHeaders(): Promise<Record<string, string>> {
+  const built = await buildRequestInit({
+    method: "POST",
+    headers: {
+      Accept: "text/event-stream, application/json",
+      "Content-Type": "application/json",
+    },
+    body: "{}",
+  });
+  const headers = built.headers as Headers;
+  const out: Record<string, string> = {};
+  headers.forEach((value, key) => {
+    out[key] = value;
+  });
+  return out;
+}
+
 function shouldAttemptRefresh(path: string, retried: boolean): boolean {
   if (retried) return false;
   if (path.includes("/auth/login")) return false;
   if (path.includes("/auth/token/refresh")) return false;
   return true;
+}
+
+/** Dev: stream directly to Django (avoids Vite proxy buffering POST SSE). Set VITE_DESIGNER_STREAM_VIA_PROXY=1 to force proxy. */
+export function resolveDevStreamUrl(path: string): string {
+  if (import.meta.env.DEV && import.meta.env.VITE_DESIGNER_STREAM_VIA_PROXY !== "1") {
+    const origin = (import.meta.env.VITE_DEV_API_ORIGIN ?? "http://127.0.0.1:8000").replace(/\/$/, "");
+    return `${origin}${path.startsWith("/") ? path : `/${path}`}`;
+  }
+  return path;
 }
 
 /** Shared fetch: Bearer JWT, CSRF for session-backed POSTs, automatic refresh on 401. */

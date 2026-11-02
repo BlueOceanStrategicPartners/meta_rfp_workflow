@@ -1,6 +1,7 @@
 """Upload, storage, and Muse Spark metadata for designer media assets."""
 from __future__ import annotations
 
+import logging
 import mimetypes
 from typing import Any
 
@@ -9,7 +10,9 @@ from django.core.files.uploadedfile import UploadedFile
 from django.http import HttpRequest
 
 from apps.designer_studio.models import DesignerMediaAsset, MediaAssetType, ProposalTemplate
-from apps.rfp_debate.meta_client import MetaModelClient
+from apps.rfp_debate.meta_client import MetaModelAPIError, MetaModelClient
+
+logger = logging.getLogger(__name__)
 
 ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
 ALLOWED_VIDEO_TYPES = {"video/mp4", "video/webm", "video/quicktime"}
@@ -91,7 +94,6 @@ def enrich_asset_metadata(asset: DesignerMediaAsset, request: HttpRequest) -> De
         "width": asset.width,
         "height": asset.height,
     }
-    client = MetaModelClient()
     prompt = (
         "You analyze media for a hospitality proposal template designer. "
         "Return JSON: description (string), suggested_placement (hero|gallery|sidebar|background), "
@@ -101,13 +103,26 @@ def enrich_asset_metadata(asset: DesignerMediaAsset, request: HttpRequest) -> De
         f"Media metadata:\n{base_meta}\n"
         "If information is limited, infer reasonable creative usage for a luxury hotel RFP proposal."
     )
-    raw = client.complete_json(
-        model_id=settings.META_MODEL_SPARK,
-        system_prompt=prompt,
-        user_content=user,
-        fixture_kind="designer_asset_meta",
-    )
-    asset.metadata_json = {**base_meta, **raw, "upload_status": "ready"}
+    client = MetaModelClient()
+    try:
+        raw = client.complete_json(
+            model_id=settings.META_MODEL_SPARK,
+            system_prompt=prompt,
+            user_content=user,
+            fixture_kind="designer_asset_meta",
+        )
+        asset.metadata_json = {**base_meta, **raw, "upload_status": "ready"}
+    except MetaModelAPIError as exc:
+        logger.warning("Asset metadata Muse call failed, using upload metadata only: %s", exc)
+        asset.metadata_json = {
+            **base_meta,
+            "description": "Uploaded proposal media",
+            "suggested_placement": "gallery",
+            "upload_status": "ready",
+        }
+    except Exception as exc:
+        logger.warning("Asset metadata enrichment failed: %s", exc)
+        asset.metadata_json = {**base_meta, "upload_status": "ready"}
     asset.save(update_fields=["metadata_json"])
     return asset
 

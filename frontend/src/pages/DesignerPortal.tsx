@@ -1,6 +1,13 @@
+import PreviewAutomationIndicator from "../components/designer/PreviewAutomationIndicator";
+import {
+  runPreviewPanelAutomation,
+  waitForPreviewIframe,
+  shouldAttachPreviewAutomation,
+} from "../lib/designerPreviewAutomation";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   KeyboardEvent,
+  ClipboardEvent,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -9,21 +16,33 @@ import {
   useState,
   type DragEvent,
 } from "react";
+import { flushSync } from "react-dom";
 import { createPortal } from "react-dom";
 import ChatMessageView from "../components/designer/ChatMessageView";
-import DesignerAgentProgress, { designerAgentPhaseCount } from "../components/designer/DesignerAgentProgress";
+import DesignerAgentProgress from "../components/designer/DesignerAgentProgress";
+import {
+  streamDesignerChat,
+  normalizeAgentWorkPlanSteps,
+  type AgentPreviewSnapshot,
+  type AgentProgressItem,
+  type AgentToolStep,
+  type AgentWorkPlanStep,
+} from "../lib/designerChatStream";
+import { isPlanningOnlyTodos, PLANNING_WAIT_TODOS } from "../lib/designerAgentTodos";
 import ConfirmDialog from "../components/designer/ConfirmDialog";
 import MediaLibraryDrawer from "../components/designer/MediaLibraryDrawer";
+import AgentRulesDialog from "../components/designer/AgentRulesDialog";
 import TemplateLibraryCard from "../components/designer/TemplateLibraryCard";
+import TemplateVersionHistoryDialog from "../components/designer/TemplateVersionHistoryDialog";
+import VenueMapsDrawer from "../components/designer/VenueMapsDrawer";
 import ShortcutHelpModal from "../components/designer/ShortcutHelpModal";
 import StudioPortalBootSplash from "../components/designer/StudioPortalBootSplash";
 import StudioPortalLogin from "../components/designer/StudioPortalLogin";
 import StudioSnackbar, { inferSnackbarTone, type SnackbarTone } from "../components/designer/StudioSnackbar";
 import TemplateIconButton, {
+  IconAgentRules,
   IconCheckTemplate,
   IconClearChat,
-  IconDuplicate,
-  IconExport,
   IconExternalTab,
   IconFullscreen,
   IconHelp,
@@ -32,56 +51,99 @@ import TemplateIconButton, {
   IconPhoneDevice,
   IconRegenerate,
   IconSampleData,
-  IconSave,
   IconSendArrow,
-  IconStar,
   IconPaperclip,
   IconMic,
   IconTabletDevice,
-  IconTrash,
   IconUndo,
 } from "../components/designer/TemplateIconButton";
 import { IconNavMap } from "../components/AppNavIcons";
 import {
-  designerChat,
   deleteTemplate,
   downloadJson,
   duplicateTemplate,
   exportTemplateBundle,
-  injectDefaultVenueMapIntoTemplate,
+  fetchDesignerLiveProgress,
   listMediaAssets,
   listTemplates,
   loginDesigner,
   previewTemplate,
+  removeVenueMapSlotFromProposal,
   restoreRevision,
   saveTemplate,
   updateTemplate,
   validateTemplate,
   type ChatMessage,
   type DesignerMediaAsset,
+  type PreviewAutomationReport,
   type ProposalTemplate,
   type TemplateRevision,
 } from "../lib/designerApi";
-import { uploadDesignerAssetWithProgress } from "../lib/designerUpload";
-import { compileLocalTemplatePreview } from "../lib/designerTemplatePreview";
+import {
+  imageFilesFromClipboardEvent,
+  labelPastedScreenshotFile,
+  uploadDesignerAssetWithProgress,
+} from "../lib/designerUpload";
+import { applyLivePreviewDocumentChrome, compileLocalTemplatePreview } from "../lib/designerTemplatePreview";
+import { applyDesignerLiveProgressSnapshot } from "../lib/designerLiveProgressApply";
+import {
+  dismissLatestAssistantActionState,
+  restoreDesignerActionUi,
+} from "../lib/designerChatActionState";
+import {
+  deleteVenueMap,
+  listVenueMaps,
+  restoreMapRevision,
+  updateVenueMap,
+  type VenueMapRecord,
+} from "../lib/mapStudioApi";
 import {
   readLastDesignerTemplateId,
   writeLastDesignerTemplateId,
 } from "../lib/studioLastSelection";
 import { useStudioPortalAuth } from "../hooks/useStudioPortalAuth";
+import { useLivePreviewIframeScrollPort } from "../hooks/useLivePreviewIframeScrollPort";
 import { useAppShell } from "../context/AppShellContext";
 
 const ACCEPT = "image/*,video/*";
-const COMPOSER_MAX_LINES = 4;
+const COMPOSER_MAX_LINES = 10;
 const SUGGESTED_PROMPTS = [
+  "Corporate summit proposal with map slot — skip questions and build both stages",
   "Luxury dark theme with gold accents and hero video",
-  "Corporate clean layout with sticky pricing summary",
+  "Create the proposal, then ask me for a floorplan to build the interactive map",
+  "List my saved venue maps",
   "Embed uploaded media in a responsive gallery grid",
-  "Add the system default venue map at {{selected_map_svg}} with a responsive iframe slot",
 ];
 
 type TemplateSnapshot = { html: string; css: string; js: string };
 type UploadRow = { id: string; name: string; progress: number; status: "uploading" | "done" | "error" };
+
+type TemplatePersistSnapshot = {
+  name: string;
+  html: string;
+  css: string;
+  js: string;
+  historyKey: string;
+};
+
+function buildPersistSnapshot(
+  name: string,
+  html: string,
+  css: string,
+  js: string,
+  history: ChatMessage[],
+): TemplatePersistSnapshot {
+  const historyKey = JSON.stringify(
+    history.map((m) => ({ role: m.role, content: m.content, ts: m.ts ?? "" })),
+  );
+  return {
+    name,
+    html,
+    css,
+    js: js || "",
+    historyKey,
+  };
+}
 
 type SnackbarState = { message: string; tone: SnackbarTone };
 
@@ -102,7 +164,15 @@ export default function DesignerPortal() {
   const [draft, setDraft] = useState("");
   const [previewDoc, setPreviewDoc] = useState("");
   const [busy, setBusy] = useState(false);
-  const [agentPhaseIndex, setAgentPhaseIndex] = useState(0);
+  const [agentWorkPlan, setAgentWorkPlan] = useState<AgentWorkPlanStep[]>([]);
+  const [agentTodos, setAgentTodos] = useState<AgentWorkPlanStep[]>([]);
+  const [agentToolSteps, setAgentToolSteps] = useState<AgentToolStep[]>([]);
+  const [agentPartialProgress, setAgentPartialProgress] = useState<{
+    completed: AgentProgressItem[];
+    remaining: string[];
+  } | null>(null);
+  const agentToolStepsRef = useRef<AgentToolStep[]>([]);
+  const agentTodosRef = useRef<AgentWorkPlanStep[]>([]);
   const [snackbar, setSnackbar] = useState<SnackbarState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loginBusy, setLoginBusy] = useState(false);
@@ -119,11 +189,26 @@ export default function DesignerPortal() {
   const [previewFullscreen, setPreviewFullscreen] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
   const [showLibrary, setShowLibrary] = useState(false);
+  const [showVenueMaps, setShowVenueMaps] = useState(false);
+  const [venueMaps, setVenueMaps] = useState<VenueMapRecord[]>([]);
+  const [selectedVenueMapId, setSelectedVenueMapId] = useState<string | null>(null);
+  const [confirmDeleteVenueMapId, setConfirmDeleteVenueMapId] = useState<string | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [mentionOpen, setMentionOpen] = useState(false);
   const [srStatus, setSrStatus] = useState("");
+  const [previewAutomationState, setPreviewAutomationState] = useState<
+    "idle" | "running" | "used" | "error"
+  >("idle");
+  const [templateMenuOpenId, setTemplateMenuOpenId] = useState<string | null>(null);
+  const [templateHistoryOpen, setTemplateHistoryOpen] = useState(false);
+  const [showAgentRules, setShowAgentRules] = useState(false);
+  const [savedSnapshot, setSavedSnapshot] = useState<TemplatePersistSnapshot | null>(null);
   const lastUserMessage = useRef("");
+  const chatRunIdRef = useRef(0);
+  const chatAbortRef = useRef<AbortController | null>(null);
+  const previewIframeRef = useRef<HTMLIFrameElement>(null);
+  const livePreviewIframeHeight = useLivePreviewIframeScrollPort(previewIframeRef, previewDoc);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -137,10 +222,23 @@ export default function DesignerPortal() {
     [templates, templateSearch]
   );
 
-  const activeTemplateIsDefault = useMemo(
-    () => Boolean(templates.find((t) => t.id === activeId)?.is_default),
-    [templates, activeId]
-  );
+  const templateIsDirty = useMemo(() => {
+    const baseline = savedSnapshot;
+    if (!baseline) {
+      if (activeId) return false;
+      return Boolean(html.trim() || css.trim() || js.trim() || history.length > 0 || name !== "Untitled theme");
+    }
+    const historyKey = JSON.stringify(
+      history.map((m) => ({ role: m.role, content: m.content, ts: m.ts ?? "" })),
+    );
+    return (
+      baseline.name !== name ||
+      baseline.html !== html ||
+      baseline.css !== css ||
+      baseline.js !== (js || "") ||
+      baseline.historyKey !== historyKey
+    );
+  }, [savedSnapshot, activeId, name, html, css, js, history]);
 
   const previewFrameWidth =
     previewWidth === "tablet" ? "768px" : previewWidth === "mobile" ? "390px" : "100%";
@@ -151,21 +249,126 @@ export default function DesignerPortal() {
 
   const dismissSnackbar = useCallback(() => setSnackbar(null), []);
 
-  useEffect(() => {
-    if (!busy) {
-      setAgentPhaseIndex(0);
-      return;
-    }
-    const id = window.setInterval(() => {
-      setAgentPhaseIndex((i) => (i + 1) % designerAgentPhaseCount());
-    }, 2200);
-    return () => window.clearInterval(id);
-  }, [busy]);
-
   const agentWorkingPreviewDoc = useMemo(
-    () => compileLocalTemplatePreview(html, css, js),
+    () => compileLocalTemplatePreview(html, css, js, { thumbnail: true }),
     [html, css, js]
   );
+
+  const PREVIEW_REFRESH_MIN_MS = 1200;
+  const previewRefreshRef = useRef<{
+    lastAt: number;
+    pending: AgentPreviewSnapshot | null;
+    timer: number;
+  }>({ lastAt: 0, pending: null, timer: 0 });
+
+  const flushAgentPreviewNow = useCallback((snap: AgentPreviewSnapshot) => {
+    flushSync(() => {
+      setHtml(snap.html_markup);
+      setCss(snap.css_stylesheet);
+      setJs(snap.js_script);
+      setPreviewDoc(compileLocalTemplatePreview(snap.html_markup, snap.css_stylesheet, snap.js_script));
+    });
+    previewRefreshRef.current.lastAt = Date.now();
+    previewRefreshRef.current.pending = null;
+  }, []);
+
+  const applyAgentPreviewSnapshot = useCallback(
+    (snap: AgentPreviewSnapshot) => {
+      const state = previewRefreshRef.current;
+      const now = Date.now();
+      if (now - state.lastAt >= PREVIEW_REFRESH_MIN_MS) {
+        flushAgentPreviewNow(snap);
+        return;
+      }
+      state.pending = snap;
+      if (state.timer) return;
+      const delay = Math.max(0, PREVIEW_REFRESH_MIN_MS - (now - state.lastAt));
+      state.timer = window.setTimeout(() => {
+        state.timer = 0;
+        const pending = state.pending;
+        if (pending) flushAgentPreviewNow(pending);
+      }, delay);
+    },
+    [flushAgentPreviewNow],
+  );
+
+  const clearAgentPreviewDebounce = useCallback(() => {
+    const state = previewRefreshRef.current;
+    if (state.timer) {
+      window.clearTimeout(state.timer);
+      state.timer = 0;
+    }
+    state.pending = null;
+  }, []);
+
+  const resetAgentSessionUi = useCallback(() => {
+    setAgentWorkPlan([]);
+    setAgentTodos([]);
+    setAgentToolSteps([]);
+    agentToolStepsRef.current = [];
+    setAgentPartialProgress(null);
+    setClarifications([]);
+    setPreviewAutomationState("idle");
+    const state = previewRefreshRef.current;
+    if (state.timer) {
+      window.clearTimeout(state.timer);
+      state.timer = 0;
+    }
+    state.pending = null;
+    state.lastAt = 0;
+  }, []);
+
+  const stopActiveAgentRequest = useCallback(() => {
+    chatRunIdRef.current += 1;
+    chatAbortRef.current?.abort();
+    chatAbortRef.current = null;
+    resetAgentSessionUi();
+    setBusy(false);
+    setError(null);
+  }, [resetAgentSessionUi]);
+
+  const liveProgressHandlers = useCallback(
+    () => ({
+      setAgentWorkPlan,
+      setAgentTodos,
+      setAgentToolSteps,
+      agentTodosRef,
+      agentToolStepsRef,
+      applyPreview: applyAgentPreviewSnapshot,
+    }),
+    [applyAgentPreviewSnapshot],
+  );
+
+  useEffect(() => {
+    if (busy) return;
+    const restored = restoreDesignerActionUi(history);
+    setAgentPartialProgress(restored.partialProgress);
+    setClarifications(restored.clarifications);
+    setAgentTodos(restored.agentTodos);
+    if (restored.agentTodos.length > 0) {
+      agentTodosRef.current = restored.agentTodos;
+    }
+  }, [history, busy]);
+
+  useEffect(() => {
+    if (!authed || busy) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const snap = await fetchDesignerLiveProgress();
+        if (cancelled || !snap.active) return;
+        const handlers = liveProgressHandlers();
+        if (applyDesignerLiveProgressSnapshot(snap, handlers)) {
+          setBusy(true);
+        }
+      } catch {
+        /* optional */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [authed, activeId, busy, liveProgressHandlers]);
 
   const syncComposerTextareaHeight = useCallback(() => {
     const el = textareaRef.current;
@@ -190,6 +393,23 @@ export default function DesignerPortal() {
     setLibraryAssets(await listMediaAssets(activeId));
   }, [activeId]);
 
+  const refreshVenueMaps = useCallback(async () => {
+    const list = await listVenueMaps().catch(() => [] as VenueMapRecord[]);
+    setVenueMaps(list);
+    setSelectedVenueMapId((prev) => {
+      if (prev && list.some((m) => m.id === prev)) return prev;
+      return list.find((m) => m.is_default)?.id ?? list[0]?.id ?? null;
+    });
+  }, []);
+
+  const proposalHasMapSlot = useMemo(
+    () =>
+      html.includes("{{selected_map_svg}}") ||
+      html.includes("venue-map-proposal") ||
+      html.includes("venue-map-slot"),
+    [html],
+  );
+
   useEffect(() => {
     if (!authed) {
       restoredSelectionRef.current = false;
@@ -213,7 +433,15 @@ export default function DesignerPortal() {
           setHistory(match.chat_history_json || []);
           setRevisions(match.revision_history_json || []);
           setAttachments([]);
-          setClarifications([]);
+          setSavedSnapshot(
+            buildPersistSnapshot(
+              match.name,
+              match.html_markup,
+              match.css_stylesheet,
+              match.js_script || "",
+              match.chat_history_json || [],
+            ),
+          );
         } else {
           writeLastDesignerTemplateId(null);
         }
@@ -228,12 +456,33 @@ export default function DesignerPortal() {
   useEffect(() => {
     if (authed) {
       refreshLibrary().catch(() => setLibraryAssets([]));
+      refreshVenueMaps().catch(() => setVenueMaps([]));
     }
-  }, [authed, activeId, refreshLibrary]);
+  }, [authed, activeId, refreshLibrary, refreshVenueMaps]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [history, busy]);
+
+  useEffect(() => {
+    if (!busy) return;
+    let cancelled = false;
+    const applyPoll = async () => {
+      try {
+        const snap = await fetchDesignerLiveProgress();
+        if (cancelled || !snap.active) return;
+        applyDesignerLiveProgressSnapshot(snap, liveProgressHandlers());
+      } catch {
+        /* poll optional */
+      }
+    };
+    void applyPoll();
+    const pollId = window.setInterval(() => void applyPoll(), 750);
+    return () => {
+      cancelled = true;
+      window.clearInterval(pollId);
+    };
+  }, [busy, liveProgressHandlers]);
 
   useLayoutEffect(() => {
     syncComposerTextareaHeight();
@@ -281,21 +530,34 @@ export default function DesignerPortal() {
     setHistory(t.chat_history_json || []);
     setRevisions(t.revision_history_json || []);
     setAttachments([]);
-    setClarifications([]);
+    setTemplateMenuOpenId(null);
+    setTemplateHistoryOpen(false);
+    setSavedSnapshot(
+      buildPersistSnapshot(t.name, t.html_markup, t.css_stylesheet, t.js_script || "", t.chat_history_json || []),
+    );
     dismissSnackbar();
   };
 
   const clearConversation = async () => {
+    stopActiveAgentRequest();
     setHistory([]);
     setPinnedIdx(new Set());
     setConfirmClear(false);
-    if (!activeId) return;
+    if (!activeId) {
+      showSnackbar("Conversation cleared.", "success");
+      return;
+    }
     try {
       await updateTemplate(activeId, { chat_history_json: [] });
       setTemplates((list) =>
         list.map((t) => (t.id === activeId ? { ...t, chat_history_json: [] } : t)),
       );
-      showSnackbar("Conversation cleared.", "success");
+      setSavedSnapshot((prev) =>
+        prev
+          ? { ...prev, historyKey: "[]" }
+          : buildPersistSnapshot(name, html, css, js || "", []),
+      );
+      showSnackbar("Conversation cleared and agent stopped.", "success");
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Could not clear chat.";
       showSnackbar(msg, "error");
@@ -312,6 +574,7 @@ export default function DesignerPortal() {
     setJs("");
     setHistory([]);
     setRevisions([]);
+    setSavedSnapshot(buildPersistSnapshot("Untitled theme", "", "", "", []));
     setAttachments([]);
     dismissSnackbar();
   };
@@ -339,41 +602,82 @@ export default function DesignerPortal() {
     }
     if (showSampleData) {
       const data = await previewTemplate(html, css, js);
-      setPreviewDoc(data.compiled_html || "");
+      setPreviewDoc(applyLivePreviewDocumentChrome(data.compiled_html || ""));
     } else {
-      const style = css ? `<style>${css}</style>` : "";
-      const script = js ? `<script>${js}</script>` : "";
-      setPreviewDoc(
-        `<!DOCTYPE html><html><head><meta charset='utf-8'><style>html,body{font-family:system-ui,sans-serif;margin:0;}</style>${style}</head><body>${html}${script}</body></html>`
-      );
+      setPreviewDoc(compileLocalTemplatePreview(html, css, js));
     }
   }, [css, html, js, showSampleData]);
 
-  const insertDefaultVenueMapSlot = useCallback(async () => {
+  const handleSetDefaultVenueMap = async (id: string) => {
     setBusy(true);
     try {
-      const updated = await injectDefaultVenueMapIntoTemplate(html, css);
-      setHtml(updated.html_markup);
-      setCss(updated.css_stylesheet);
-      if (!updated.default_map.available) {
-        showSnackbar(updated.default_map.detail || "No default map in Map Studio.", "warning");
-      } else {
-        showSnackbar(`Inserted map slot — ${updated.default_map.title || "default map"}`, "success");
-        setSrStatus("Default venue map slot added. Turn on sample data in preview to see the live map.");
-      }
+      await updateVenueMap(id, { is_default: true });
+      await refreshVenueMaps();
       await refreshPreview();
+      showSnackbar("Default venue map updated.", "success");
     } catch {
-      showSnackbar("Could not insert default venue map slot.", "error");
+      showSnackbar("Could not set default map.", "error");
     } finally {
       setBusy(false);
     }
-  }, [css, html, refreshPreview, showSnackbar]);
+  };
+
+  const handleDeleteVenueMap = async (id: string) => {
+    setBusy(true);
+    try {
+      await deleteVenueMap(id);
+      setConfirmDeleteVenueMapId(null);
+      await refreshVenueMaps();
+      await refreshPreview();
+      showSnackbar("Venue map deleted.", "success");
+    } catch {
+      showSnackbar("Could not delete map.", "error");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleRestoreVenueMapRevision = async (mapId: string, index: number) => {
+    setBusy(true);
+    try {
+      await restoreMapRevision(mapId, index);
+      await refreshVenueMaps();
+      await refreshPreview();
+      showSnackbar("Map revision restored.", "success");
+    } catch {
+      showSnackbar("Could not restore revision.", "error");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleRemoveMapFromProposal = async () => {
+    pushUndo();
+    setBusy(true);
+    try {
+      const updated = await removeVenueMapSlotFromProposal(html, css);
+      setHtml(updated.html_markup);
+      setCss(updated.css_stylesheet);
+      if (activeId) {
+        await updateTemplate(activeId, {
+          html_markup: updated.html_markup,
+          css_stylesheet: updated.css_stylesheet,
+        });
+      }
+      await refreshPreview();
+      showSnackbar("Removed map section from this proposal.", "success");
+    } catch {
+      showSnackbar("Could not remove map section.", "error");
+    } finally {
+      setBusy(false);
+    }
+  };
 
   useEffect(() => {
     refreshPreview().catch(() => setPreviewDoc(""));
   }, [refreshPreview]);
 
-  const uploadFiles = async (files: FileList | File[]) => {
+  const uploadFiles = useCallback(async (files: FileList | File[]) => {
     for (const file of Array.from(files)) {
       const rowId = `${file.name}-${Date.now()}`;
       setUploadRows((r) => [...r, { id: rowId, name: file.name, progress: 0, status: "uploading" }]);
@@ -397,16 +701,52 @@ export default function DesignerPortal() {
       }
     }
     setTimeout(() => setUploadRows((r) => r.filter((x) => x.status === "uploading")), 3000);
-  };
+  }, [activeId]);
+
+  const onComposerPaste = useCallback(
+    (e: ClipboardEvent<HTMLTextAreaElement>) => {
+      const raw = imageFilesFromClipboardEvent(e.nativeEvent);
+      if (raw.length === 0 || busy || uploading) return;
+      e.preventDefault();
+      const files = raw.map((f, i) => labelPastedScreenshotFile(f, i));
+      showSnackbar(
+        files.length === 1 ? "Screenshot pasted — uploading…" : `${files.length} images pasted — uploading…`,
+        "success",
+      );
+      void uploadFiles(files);
+    },
+    [busy, uploading, showSnackbar, uploadFiles],
+  );
+
+const FLOORPLAN_UPLOAD_CHIP = /upload.*floorplan|floorplan.*upload|attach.*floorplan|i'?ll upload a floorplan/i;
+const PREVIEW_ISSUE_MESSAGE = /preview|not showing|close button|looks wrong|debug|overlap|map always|why now/i;
 
   const sendMessage = async (textOverride?: string) => {
     const text = (textOverride ?? draft).trim();
     if ((!text && attachments.length === 0) || busy) return;
+
+    if (text && FLOORPLAN_UPLOAD_CHIP.test(text) && attachments.length === 0) {
+      showSnackbar("Attach a floorplan image first (paperclip or drag-and-drop), then send.", "warning");
+      fileInputRef.current?.click();
+      return;
+    }
+
     lastUserMessage.current = text;
     pushUndo();
     setBusy(true);
     setError(null);
     setClarifications([]);
+    setPreviewAutomationState("idle");
+    setAgentWorkPlan([]);
+    setAgentTodos(PLANNING_WAIT_TODOS);
+    agentTodosRef.current = PLANNING_WAIT_TODOS;
+    setAgentToolSteps([]);
+    agentToolStepsRef.current = [];
+    setAgentPartialProgress(null);
+    const runId = ++chatRunIdRef.current;
+    const abortController = new AbortController();
+    chatAbortRef.current = abortController;
+    const isActiveRun = () => runId === chatRunIdRef.current;
     const pendingUser: ChatMessage = {
       role: "user",
       content: text || "(attachments only)",
@@ -417,7 +757,28 @@ export default function DesignerPortal() {
     const pendingAttachments = [...attachments];
     setAttachments([]);
     try {
-      const data = await designerChat({
+      const includeAudit = PREVIEW_ISSUE_MESSAGE.test(text) || shouldAttachPreviewAutomation(text, false);
+      let automationReport: PreviewAutomationReport | null = null;
+      if (includeAudit && (html || css || js)) {
+        if (showSampleData) {
+          await refreshPreview();
+          await new Promise((r) => window.setTimeout(r, 120));
+        }
+        setPreviewAutomationState("running");
+        await waitForPreviewIframe(previewIframeRef.current, 5000);
+        automationReport = await runPreviewPanelAutomation(
+          previewIframeRef.current,
+          previewDoc || undefined,
+        );
+        if (automationReport.error) {
+          setPreviewAutomationState("error");
+        } else {
+          setPreviewAutomationState("used");
+        }
+      }
+
+      const data = await streamDesignerChat(
+        {
         message: text,
         history: history,
         html_markup: html,
@@ -425,20 +786,197 @@ export default function DesignerPortal() {
         js_script: js,
         attachment_ids: pendingAttachments.map((a) => a.id),
         template_id: activeId || undefined,
-      });
+        include_preview_audit: includeAudit,
+        preview_automation_report: automationReport,
+        preview_automation_depth: 0,
+        },
+        {
+          onPlan: (steps) => {
+            if (!isActiveRun()) return;
+            flushSync(() => {
+              setAgentWorkPlan(steps);
+              if (isPlanningOnlyTodos(agentTodosRef.current)) {
+                agentTodosRef.current = [];
+                setAgentTodos([]);
+              }
+            });
+          },
+          onStep: (steps) => {
+            if (!isActiveRun()) return;
+            flushSync(() => {
+              setAgentWorkPlan(steps);
+              if (isPlanningOnlyTodos(agentTodosRef.current)) {
+                agentTodosRef.current = [];
+                setAgentTodos([]);
+              }
+            });
+          },
+          onTodo: (todos) => {
+            if (!isActiveRun()) return;
+            const normalized = normalizeAgentWorkPlanSteps(todos);
+            if (normalized.length === 0) return;
+            if (isPlanningOnlyTodos(normalized)) return;
+            flushSync(() => {
+              agentTodosRef.current = normalized;
+              setAgentTodos(normalized);
+            });
+          },
+          onDone: (response) => {
+            if (!isActiveRun()) return;
+            const normalized = normalizeAgentWorkPlanSteps(response.agent_todos);
+            if (normalized.length === 0) return;
+            flushSync(() => {
+              agentTodosRef.current = normalized;
+              setAgentTodos(normalized);
+            });
+          },
+          onError: (message) => {
+            if (!isActiveRun()) return;
+            setError(message);
+            showSnackbar(message, "error");
+          },
+          onStatus: (payload) => {
+            if (!isActiveRun()) return;
+            if (payload.kind === "model_api_error" && payload.message) {
+              showSnackbar(payload.message, "warning");
+            }
+          },
+          onPreview: (snap) => {
+            if (!isActiveRun()) return;
+            applyAgentPreviewSnapshot(snap);
+          },
+          onTool: (step) => {
+            if (!isActiveRun()) return;
+            flushSync(() => {
+              setAgentToolSteps((prev) => {
+                const next = [...prev, step].slice(-24);
+                agentToolStepsRef.current = next;
+                return next;
+              });
+            });
+          },
+        },
+        abortController.signal,
+      );
+      if (!isActiveRun()) return;
       setHistory(data.history || []);
       setHtml(data.html_markup || html);
       setCss(data.css_stylesheet || css);
       setJs(data.js_script || js);
+      flushAgentPreviewNow({
+        html_markup: data.html_markup || html,
+        css_stylesheet: data.css_stylesheet || css,
+        js_script: data.js_script || js,
+      });
+      clearAgentPreviewDebounce();
+      if (data.work_plan?.length) {
+        setAgentWorkPlan(data.work_plan);
+      }
+      if (data.agent_todos?.length) {
+        const normalized = normalizeAgentWorkPlanSteps(data.agent_todos);
+        agentTodosRef.current = normalized;
+        setAgentTodos(normalized);
+      } else if (isPlanningOnlyTodos(agentTodosRef.current)) {
+        agentTodosRef.current = [];
+        setAgentTodos([]);
+      }
       setClarifications(data.clarification_options || []);
+      if (data.partial_completion && data.continuation_recommended) {
+        const completed =
+          data.progress_completed?.length
+            ? data.progress_completed
+            : agentToolStepsRef.current.map((t, idx) => ({
+                id: `live-${idx}`,
+                label: `${t.phase === "repair" ? "Fix: " : ""}${t.label}`,
+                ok: t.ok,
+              }));
+        setAgentPartialProgress({
+          completed,
+          remaining: data.remaining_items ?? [],
+        });
+        showSnackbar("Partial update — use Continue in the progress card or pick an option below.", "warning");
+      } else if (data.model_api_error) {
+        showSnackbar(
+          "Design model timed out during validation repair. Preview kept from the last successful edit.",
+          "warning",
+        );
+      } else {
+        setAgentPartialProgress(null);
+        if (!data.agent_todos?.length) {
+          setAgentToolSteps([]);
+        }
+      }
       dismissSnackbar();
-      setSrStatus("Agent updated the proposal template.");
-    } catch {
+      if (data.attachment_required) {
+        showSnackbar("Attach a floorplan image, then send again.", "warning");
+      } else if (data.preview_automation_used) {
+        setPreviewAutomationState("used");
+      } else if (automationReport && !automationReport.error) {
+        setPreviewAutomationState("idle");
+      }
+      if (data.preview_audit_findings?.length) {
+        showSnackbar(
+          `Preview check: ${data.preview_audit_findings.length} issue(s) — agent applied fixes where possible.`,
+          "warning",
+        );
+      }
+      if (data.venue_maps_action || data.map_stage_applied || data.venue_map_id) {
+        void refreshVenueMaps();
+      }
+      if (data.venue_maps_action) {
+        showSnackbar("Venue map library updated.", "success");
+      }
+      if (data.map_stage_applied) {
+        showSnackbar(
+          data.venue_map_title
+            ? `Interactive map saved: ${data.venue_map_title}. Turn on sample data to preview.`
+            : "Interactive venue map updated for this proposal.",
+          "success",
+        );
+        setSrStatus("Proposal and venue map updated.");
+      } else if (data.self_check?.valid) {
+        setSrStatus("Agent updated the proposal (automatic checks passed).");
+      } else {
+        setSrStatus("Agent updated the proposal template.");
+      }
+      const nextHistory = data.history || [];
+      const nextHtml = data.html_markup || html;
+      const nextCss = data.css_stylesheet || css;
+      const nextJs = data.js_script || js;
+      const agentChanged =
+        nextHtml !== html ||
+        nextCss !== css ||
+        nextJs !== js ||
+        JSON.stringify(nextHistory) !== JSON.stringify(history);
+      if (agentChanged || !activeId) {
+        try {
+          await saveActiveTemplate({
+            silent: true,
+            override: {
+              html: nextHtml,
+              css: nextCss,
+              js: nextJs,
+              history: nextHistory,
+            },
+          });
+        } catch {
+          showSnackbar("Agent finished but auto-save failed — use Save on the template card.", "warning");
+        }
+      }
+    } catch (e) {
+      if (!isActiveRun() || (e instanceof DOMException && e.name === "AbortError")) {
+        return;
+      }
       setError("Design agent request failed.");
       setHistory((h) => h.filter((m) => m !== pendingUser));
       setAttachments(pendingAttachments);
+      setPreviewAutomationState("error");
     } finally {
-      setBusy(false);
+      if (isActiveRun()) {
+        clearAgentPreviewDebounce();
+        setBusy(false);
+        chatAbortRef.current = null;
+      }
     }
   };
 
@@ -458,7 +996,7 @@ export default function DesignerPortal() {
     });
   };
 
-  const handleExport = async () => {
+  const handleExport = useCallback(async () => {
     const bundle = {
       exported_at: new Date().toISOString(),
       name,
@@ -477,6 +1015,133 @@ export default function DesignerPortal() {
       }
     }
     downloadJson(`${name.replace(/\s+/g, "_")}_export.json`, bundle);
+  }, [activeId, css, history, html, js, name]);
+
+  const saveActiveTemplate = useCallback(
+    async (opts?: {
+      silent?: boolean;
+      override?: { name?: string; html?: string; css?: string; js?: string; history?: ChatMessage[] };
+    }) => {
+      const payloadName = opts?.override?.name ?? name;
+      const payloadHtml = opts?.override?.html ?? html;
+      const payloadCss = opts?.override?.css ?? css;
+      const payloadJs = opts?.override?.js ?? js;
+      const payloadHistory = opts?.override?.history ?? history;
+      if (!opts?.silent) setBusy(true);
+      try {
+        const payload = {
+          name: payloadName,
+          html_markup: payloadHtml,
+          css_stylesheet: payloadCss,
+          js_script: payloadJs,
+          chat_history_json: payloadHistory,
+          is_default: false,
+        };
+        let saved: ProposalTemplate;
+        if (activeId) saved = await updateTemplate(activeId, payload);
+        else {
+          saved = await saveTemplate(payload);
+          setActiveId(saved.id);
+        }
+        if (opts?.silent) {
+          setName(saved.name);
+          setHtml(saved.html_markup || payloadHtml);
+          setCss(saved.css_stylesheet || payloadCss);
+          setJs(saved.js_script || payloadJs);
+          setHistory(saved.chat_history_json || payloadHistory);
+          setRevisions(saved.revision_history_json || []);
+          setSavedSnapshot(
+            buildPersistSnapshot(
+              saved.name,
+              saved.html_markup || payloadHtml,
+              saved.css_stylesheet || payloadCss,
+              saved.js_script || payloadJs,
+              saved.chat_history_json || payloadHistory,
+            ),
+          );
+        } else {
+          applyTemplate(saved);
+        }
+        await refreshTemplates();
+        if (!opts?.silent) showSnackbar("Template saved successfully.", "success");
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "Save failed";
+        showSnackbar(msg, "error");
+      } finally {
+        if (!opts?.silent) setBusy(false);
+      }
+    },
+    [activeId, css, history, html, js, name, refreshTemplates, showSnackbar, applyTemplate],
+  );
+
+  const templateCardActions = useMemo(
+    () => ({
+      onDuplicate: () => {
+        if (!activeId) return;
+        void (async () => {
+          const c = await duplicateTemplate(activeId);
+          await refreshTemplates();
+          applyTemplate(c);
+          setTemplateMenuOpenId(c.id);
+        })();
+      },
+      onDelete: () => setConfirmDelete(true),
+      onSetDefault: () => {
+        if (!activeId) return;
+        void updateTemplate(activeId, { is_default: true }).then(refreshTemplates);
+      },
+      onExport: () => void handleExport(),
+    }),
+    [activeId, refreshTemplates, handleExport],
+  );
+
+  const DRAFT_CARD_ID = "__draft__";
+
+  const draftTemplatePreview = useMemo(
+    (): ProposalTemplate => ({
+      id: DRAFT_CARD_ID,
+      name,
+      html_markup: html,
+      css_stylesheet: css,
+      js_script: js,
+      is_default: false,
+      chat_history_json: history,
+      updated_at: new Date().toISOString(),
+    }),
+    [css, history, html, js, name],
+  );
+
+  const showDraftCard = !activeId;
+
+  const renderTemplateCard = (t: ProposalTemplate, opts?: { isDraft?: boolean }) => {
+    const isDraft = opts?.isDraft ?? false;
+    const cardId = isDraft ? DRAFT_CARD_ID : t.id;
+    const selected = isDraft ? !activeId : activeId === t.id;
+    return (
+      <TemplateLibraryCard
+        template={t}
+        selected={selected}
+        isDraft={isDraft}
+        busy={busy}
+        displayName={selected ? name : t.name}
+        onNameChange={selected ? setName : undefined}
+        menuOpen={templateMenuOpenId === cardId}
+        onMenuToggle={() =>
+          setTemplateMenuOpenId((open) => (open === cardId ? null : cardId))
+        }
+        actionsEnabled={selected}
+        actions={templateCardActions}
+        isDefault={!isDraft && Boolean(t.is_default)}
+        revisions={selected && !isDraft ? revisions : t.revision_history_json || []}
+        onOpenHistory={() => setTemplateHistoryOpen(true)}
+        isDirty={selected && templateIsDirty}
+        onSave={() => void saveActiveTemplate()}
+        onSelect={() => {
+          if (isDraft) return;
+          applyTemplate(t);
+        }}
+      />
+    );
   };
 
   const openPreviewTab = () => {
@@ -557,9 +1222,9 @@ export default function DesignerPortal() {
       } finally {
         setLoginBusy(false);
       }
-    };
+  };
 
-    return (
+  return (
       <div className={`${shellClass} min-h-0 flex-1`}>
         <StudioPortalLogin
           title="Designing Studio"
@@ -617,6 +1282,17 @@ export default function DesignerPortal() {
       <span className="studio-preview-toolbar-divider" aria-hidden />
       <TemplateIconButton
         compact
+        label="Venue maps — library, default, history"
+        selected={showVenueMaps}
+        onClick={() => {
+          void refreshVenueMaps();
+          setShowVenueMaps(true);
+        }}
+      >
+        <IconNavMap />
+      </TemplateIconButton>
+      <TemplateIconButton
+        compact
         label={showSampleData ? "Sample RFP data on" : "Sample RFP data off"}
         selected={showSampleData}
         onClick={() => setShowSampleData((v) => !v)}
@@ -642,7 +1318,7 @@ export default function DesignerPortal() {
         className={
           fullscreen
             ? "fixed inset-0 z-[300] flex h-dvh w-dvw min-h-0 flex-col overflow-hidden bg-[#0a0f1a]"
-            : "flex min-h-0 min-w-0 flex-[1.05] flex-col overflow-hidden rounded-2xl border border-white/10 bg-white/[0.04]"
+            : "studio-shell-panel studio-live-preview-panel studio-live-preview-panel--inline"
         }
       >
         <header
@@ -664,14 +1340,16 @@ export default function DesignerPortal() {
                 </button>
               )}
             </div>
-            {renderPreviewToolbar()}
+            <div className="min-w-0 max-w-full shrink-0">{renderPreviewToolbar()}</div>
           </div>
         </header>
-        <div className={`relative min-h-0 flex-1 bg-[#1a1a1f] ${fullscreen ? "p-2 sm:p-3" : "p-4"}`}>
-          <div className="mx-auto flex h-full min-h-0 justify-center">
+        <div
+          className={`studio-live-preview-stage ${fullscreen ? "p-2 sm:p-3" : "p-4"}`}
+        >
+          <div className="mx-auto flex h-full w-full min-h-0 min-w-0 justify-center">
             <div
-              className={`relative h-full min-h-0 overflow-hidden border border-white/10 bg-[#ececef] shadow-inner transition-all ${
-                fullscreen && previewWidth === "full" ? "w-full rounded-none" : "rounded-xl"
+              className={`studio-live-preview-frame ${
+                fullscreen && previewWidth === "full" ? "" : "studio-live-preview-frame--rounded"
               }`}
               style={{
                 width: fullscreen && previewWidth === "full" ? "100%" : previewFrameWidth,
@@ -679,12 +1357,16 @@ export default function DesignerPortal() {
               }}
             >
               {previewDoc ? (
-                <iframe
-                  title="Proposal preview"
-                  className="absolute inset-0 h-full w-full border-0 bg-white"
-                  sandbox="allow-scripts allow-same-origin"
-                  srcDoc={previewDoc}
-                />
+                <div className="studio-live-preview-scroll">
+                  <iframe
+                    ref={previewIframeRef}
+                    title="Proposal preview"
+                    className="studio-live-preview-iframe"
+                    sandbox="allow-scripts allow-same-origin"
+                    srcDoc={previewDoc}
+                    style={{ height: livePreviewIframeHeight ?? "100%" }}
+                  />
+                </div>
               ) : (
                 <div className="absolute inset-0 flex items-center justify-center text-sm text-slate-500">
                   No preview yet
@@ -716,14 +1398,62 @@ export default function DesignerPortal() {
       />
       <ShortcutHelpModal open={showHelp} onClose={() => setShowHelp(false)} />
       <MediaLibraryDrawer open={showLibrary} assets={libraryAssets} onClose={() => setShowLibrary(false)} onAttach={(a) => setAttachments((p) => (p.find((x) => x.id === a.id) ? p : [...p, a]))} onInsertMention={insertMention} />
-      <ConfirmDialog open={confirmClear} title="Clear conversation?" message="This permanently clears the design agent chat for this template." onCancel={() => setConfirmClear(false)} onConfirm={() => void clearConversation()} />
+      <VenueMapsDrawer
+        open={showVenueMaps}
+        maps={venueMaps}
+        selectedId={selectedVenueMapId}
+        busy={busy}
+        onClose={() => setShowVenueMaps(false)}
+        onSelect={(m) => setSelectedVenueMapId(m.id)}
+        onSetDefault={(id) => void handleSetDefaultVenueMap(id)}
+        onDelete={(id) => setConfirmDeleteVenueMapId(id)}
+        onRestoreRevision={(mapId, index) => void handleRestoreVenueMapRevision(mapId, index)}
+        onRemoveFromProposal={() => void handleRemoveMapFromProposal()}
+        proposalHasMapSlot={proposalHasMapSlot}
+      />
+      <AgentRulesDialog open={showAgentRules} onClose={() => setShowAgentRules(false)} />
+      <TemplateVersionHistoryDialog
+        open={templateHistoryOpen && Boolean(activeId)}
+        templateName={name}
+        revisions={revisions}
+        busy={busy}
+        onClose={() => setTemplateHistoryOpen(false)}
+        onRestore={(index) => {
+          if (!activeId) return;
+          void (async () => {
+            setBusy(true);
+            try {
+              const t = await restoreRevision(activeId, index);
+              applyTemplate(t);
+              await refreshTemplates();
+              showSnackbar("Restored template version.", "success");
+              setTemplateHistoryOpen(false);
+            } catch {
+              showSnackbar("Could not restore version.", "error");
+            } finally {
+              setBusy(false);
+            }
+          })();
+        }}
+      />
+      <ConfirmDialog open={confirmClear} title="Clear conversation?" message="Stops any in-progress design agent work and permanently clears chat for this template." onCancel={() => setConfirmClear(false)} onConfirm={() => void clearConversation()} />
       <ConfirmDialog open={confirmDelete} title="Delete template?" message="This permanently removes the template from your library." confirmLabel="Delete" onCancel={() => setConfirmDelete(false)} onConfirm={async () => { if (activeId) { await deleteTemplate(activeId); setActiveId(null); newTemplate(); await refreshTemplates(); } setConfirmDelete(false); }} />
+      <ConfirmDialog
+        open={Boolean(confirmDeleteVenueMapId)}
+        title="Delete venue map?"
+        message="This removes the map from your library. Proposals keep their map slot unless you remove it separately."
+        confirmLabel="Delete"
+        onCancel={() => setConfirmDeleteVenueMapId(null)}
+        onConfirm={() => {
+          if (confirmDeleteVenueMapId) void handleDeleteVenueMap(confirmDeleteVenueMapId);
+        }}
+      />
 
       <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden px-4 pb-[var(--studio-safe-bottom)] pt-3 sm:flex-row sm:px-6">
-        <aside className="flex max-h-[32vh] w-full shrink-0 flex-col overflow-hidden rounded-2xl border border-white/10 bg-white/[0.04] sm:max-h-none sm:w-64">
+        <aside className="studio-shell-panel flex max-h-[32vh] w-full shrink-0 flex-col sm:max-h-none sm:w-64">
           <div className="studio-panel-header !min-h-[4rem]">
             <div>
-              <p className="text-[10px] uppercase tracking-widest text-white/45">Library</p>
+              <p className="studio-panel-kicker">Library</p>
               <h2 className="font-semibold">Templates</h2>
             </div>
             <button type="button" onClick={newTemplate} className="studio-btn-secondary !min-h-0 px-2.5 py-1.5 text-[11px]">+ New</button>
@@ -731,7 +1461,7 @@ export default function DesignerPortal() {
           <div className="studio-panel-body !pb-2">
             <label className="mb-1.5 block text-[10px] font-medium uppercase tracking-wide text-white/40">Search templates</label>
             <div className="relative">
-              <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-xs text-white/35" aria-hidden>
+              <span className="studio-field-search-icon" aria-hidden>
                 ⌕
               </span>
               <input
@@ -742,115 +1472,27 @@ export default function DesignerPortal() {
               />
             </div>
           </div>
-          <ul className="studio-scroll min-h-0 flex-1 space-y-2.5 overflow-y-auto px-[var(--studio-inset-x)] pb-2">
+          <ul className="studio-scroll min-h-0 flex-1 space-y-2.5 overflow-y-auto px-[var(--studio-inset-x)] pb-3">
+            {showDraftCard && (
+              <li>{renderTemplateCard(draftTemplatePreview, { isDraft: true })}</li>
+            )}
             {filteredTemplates.map((t) => (
-              <li key={t.id}>
-                <TemplateLibraryCard
-                  template={t}
-                  selected={activeId === t.id}
-                  onSelect={() => applyTemplate(t)}
-                />
-              </li>
+              <li key={t.id}>{renderTemplateCard(t)}</li>
             ))}
-            {filteredTemplates.length === 0 && (
-              <li className="rounded-xl border border-dashed border-white/15 px-3 py-6 text-center text-xs text-white/40">
+            {!showDraftCard && filteredTemplates.length === 0 && (
+              <li className="studio-empty-list">
                 No templates match your search.
               </li>
             )}
           </ul>
-          {revisions.length > 0 && (
-            <div className="border-t border-white/10 px-[var(--studio-inset-x)] py-3">
-              <p className="text-[10px] font-medium uppercase tracking-wide text-white/40">Version history</p>
-              <ul className="studio-scroll mt-2 max-h-24 space-y-1 overflow-y-auto">
-                {revisions.map((rev, idx) => (
-                  <li key={rev.saved_at + idx}>
-                    <button type="button" className="w-full text-left text-[10px] text-violet-200 hover:underline" onClick={async () => { if (!activeId) return; const t = await restoreRevision(activeId, idx); applyTemplate(t); }}>
-                      {new Date(rev.saved_at).toLocaleString()} — {rev.note}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-          <div className="studio-panel-footer space-y-3">
-            <div>
-              <label className="mb-1.5 block text-[10px] font-medium uppercase tracking-wide text-white/40">Template name</label>
-              <input className="studio-field" value={name} onChange={(e) => setName(e.target.value)} aria-label="Template name" />
-            </div>
-            <div className="studio-template-actions">
-              <TemplateIconButton
-                label="Duplicate template"
-                disabled={!activeId || busy}
-                onClick={async () => {
-                  if (activeId) {
-                    const c = await duplicateTemplate(activeId);
-                    await refreshTemplates();
-                    applyTemplate(c);
-                  }
-                }}
-              >
-                <IconDuplicate />
-              </TemplateIconButton>
-              <TemplateIconButton
-                label="Delete template"
-                variant="danger"
-                disabled={!activeId || busy}
-                onClick={() => setConfirmDelete(true)}
-              >
-                <IconTrash />
-              </TemplateIconButton>
-              <TemplateIconButton
-                label="Save template"
-                variant="primary"
-                disabled={busy}
-                onClick={async () => {
-                  setBusy(true);
-                  try {
-                    const payload = {
-                      name,
-                      html_markup: html,
-                      css_stylesheet: css,
-                      js_script: js,
-                      chat_history_json: history,
-                      is_default: false,
-                    };
-                    if (activeId) await updateTemplate(activeId, payload);
-                    else {
-                      const c = await saveTemplate(payload);
-                      setActiveId(c.id);
-                      applyTemplate(c);
-                    }
-                    await refreshTemplates();
-                    showSnackbar("Template saved successfully.", "success");
-                  } catch (e) {
-                    const msg = e instanceof Error ? e.message : "Save failed";
-                    showSnackbar(msg, "error");
-                  } finally {
-                    setBusy(false);
-                  }
-                }}
-              >
-                <IconSave />
-              </TemplateIconButton>
-              <TemplateIconButton
-                label={activeTemplateIsDefault ? "Default template" : "Set as default"}
-                variant="accent"
-                active={activeTemplateIsDefault}
-                disabled={!activeId || busy}
-                onClick={() => {
-                  if (activeId) void updateTemplate(activeId, { is_default: true }).then(refreshTemplates);
-                }}
-              >
-                <IconStar filled={activeTemplateIsDefault} />
-              </TemplateIconButton>
-              <TemplateIconButton label="Export JSON" disabled={busy} onClick={() => void handleExport()}>
-                <IconExport />
-              </TemplateIconButton>
-            </div>
-          </div>
         </aside>
 
-        <section className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-2xl border border-white/10 bg-white/[0.03]" onDragOver={(e) => { e.preventDefault(); setDragActive(true); }} onDragLeave={() => setDragActive(false)} onDrop={async (e: DragEvent) => { e.preventDefault(); setDragActive(false); if (e.dataTransfer.files?.length) await uploadFiles(e.dataTransfer.files); }}>
+        <section
+          className="studio-shell-panel relative flex min-h-0 min-w-0 flex-1 flex-col bg-white/[0.03]"
+          onDragOver={(e) => { e.preventDefault(); setDragActive(true); }}
+          onDragLeave={() => setDragActive(false)}
+          onDrop={async (e: DragEvent) => { e.preventDefault(); setDragActive(false); if (e.dataTransfer.files?.length) await uploadFiles(e.dataTransfer.files); }}
+        >
           <AnimatePresence>
             {dragActive && (
               <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="pointer-events-none absolute inset-3 z-20 flex items-center justify-center rounded-xl border-2 border-dashed border-violet-300 bg-violet-600/25">
@@ -860,39 +1502,47 @@ export default function DesignerPortal() {
           </AnimatePresence>
           <header className="studio-panel-header">
             <div>
-              <h2 className="text-lg font-semibold">Design Agent</h2>
-              <p className="text-xs text-white/50">Drop media · Enter to send · Shift+Enter newline</p>
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="text-lg font-semibold">Design Agent</h2>
+                <PreviewAutomationIndicator state={previewAutomationState} />
+              </div>
+              <p className="studio-panel-subtitle">
+                Proposal + interactive venue map · attach floorplan when asked · say “skip questions” to auto-build
+              </p>
             </div>
             <div className="studio-toolbar">
-              <TemplateIconButton compact label="Keyboard shortcuts" onClick={() => setShowHelp(true)}>
+              <TemplateIconButton micro label="Agent rules" onClick={() => setShowAgentRules(true)}>
+                <IconAgentRules />
+              </TemplateIconButton>
+              <TemplateIconButton micro label="Keyboard shortcuts" onClick={() => setShowHelp(true)}>
                 <IconHelp />
               </TemplateIconButton>
-              <TemplateIconButton compact label="Media library" onClick={() => setShowLibrary(true)}>
+              <TemplateIconButton micro label="Media library" onClick={() => setShowLibrary(true)}>
                 <IconMediaLibrary />
               </TemplateIconButton>
               <TemplateIconButton
-                compact
+                micro
                 label="Regenerate last response"
                 disabled={!lastUserMessage.current || busy}
                 onClick={regenerate}
               >
                 <IconRegenerate />
               </TemplateIconButton>
-              <TemplateIconButton compact label="Undo layout" disabled={undoStack.length === 0} onClick={undo}>
+              <TemplateIconButton micro label="Undo layout" disabled={undoStack.length === 0} onClick={undo}>
                 <IconUndo />
               </TemplateIconButton>
-              <TemplateIconButton compact label="Clear chat" variant="danger" onClick={() => setConfirmClear(true)}>
+              <TemplateIconButton micro label="Clear chat" variant="danger" onClick={() => setConfirmClear(true)}>
                 <IconClearChat />
               </TemplateIconButton>
             </div>
           </header>
-          <div className="studio-scroll min-h-0 flex-1 space-y-3 overflow-y-auto px-[var(--studio-inset-x)] py-4">
+          <div className="studio-scroll min-h-0 flex-1 space-y-3 overflow-x-hidden overflow-y-auto px-[var(--studio-inset-x)] py-4">
             {history.length === 0 && (
-              <div className="rounded-xl border border-white/10 bg-black/25 p-4 text-sm text-white/65">
+              <div className="studio-chat-empty">
                 <p className="font-medium text-white/85">Start designing</p>
                 <div className="mt-3 flex flex-wrap gap-2">
                   {SUGGESTED_PROMPTS.map((p) => (
-                    <button key={p} type="button" className="rounded-full border border-white/15 px-3 py-1 text-xs hover:bg-violet-500/10" onClick={() => void sendMessage(p)} disabled={busy}>{p}</button>
+                    <button key={p} type="button" className="studio-suggest-chip" onClick={() => void sendMessage(p)} disabled={busy}>{p}</button>
                   ))}
                 </div>
               </div>
@@ -903,21 +1553,50 @@ export default function DesignerPortal() {
             {clarifications.length > 0 && (
               <div className="flex flex-wrap gap-2">
                 {clarifications.map((c) => (
-                  <button key={c} type="button" className="rounded-full bg-fuchsia-600/30 px-3 py-1 text-xs hover:bg-fuchsia-600/50" onClick={() => void sendMessage(c)}>{c}</button>
+                  <button key={c} type="button" className="rounded-full bg-fuchsia-600/30 px-3 py-1 text-xs hover:bg-fuchsia-600/50" onClick={() => {
+                    if (FLOORPLAN_UPLOAD_CHIP.test(c) && attachments.length === 0) {
+                      showSnackbar("Attach a floorplan image first, then tap this again or send.", "warning");
+                      fileInputRef.current?.click();
+                      return;
+                    }
+                    void sendMessage(c);
+                  }}>{c}</button>
                 ))}
               </div>
             )}
             <DesignerAgentProgress
-              active={busy}
-              phaseIndex={agentPhaseIndex}
+              active={
+                busy || agentTodos.length > 0 || Boolean(agentPartialProgress)
+              }
+              steps={agentWorkPlan}
+              tasks={agentTodos}
               previewDoc={agentWorkingPreviewDoc}
+              continuation={
+                !busy && agentPartialProgress
+                  ? {
+                      completed: agentPartialProgress.completed,
+                      remaining: agentPartialProgress.remaining,
+                      onContinue: () => {
+                        setAgentPartialProgress(null);
+                        void sendMessage("Continue — finish the remaining edits");
+                      },
+                      onDismiss: () => {
+                        setAgentPartialProgress(null);
+                        setClarifications([]);
+                        const nextHistory = dismissLatestAssistantActionState(history);
+                        setHistory(nextHistory);
+                        void saveActiveTemplate({ silent: true, override: { history: nextHistory } });
+                      },
+                    }
+                  : null
+              }
             />
             <div ref={chatEndRef} />
           </div>
           {uploadRows.length > 0 && (
             <div className="space-y-1 px-[var(--studio-inset-x)] pb-2">
               {uploadRows.map((u) => (
-                <div key={u.id} className="text-[10px] text-white/50">
+                <div key={u.id} className="studio-composer-upload-row">
                   {u.name} — {u.status === "uploading" ? `${u.progress}%` : u.status}
                   {u.status === "uploading" && <div className="mt-0.5 h-1 rounded bg-white/10"><div className="h-1 rounded bg-violet-500 transition-all" style={{ width: `${u.progress}%` }} /></div>}
                 </div>
@@ -925,7 +1604,7 @@ export default function DesignerPortal() {
             </div>
           )}
           {!dragActive && attachments.length === 0 && (
-            <div className="mx-[var(--studio-inset-x)] mb-2 flex items-center justify-center gap-2 rounded-xl border border-dashed border-violet-400/25 bg-violet-500/[0.06] px-3 py-3 text-center text-[11px] text-white/50">
+            <div className="studio-composer-dropzone">
               <span aria-hidden>⬆</span>
               Drag & drop images or videos here
             </div>
@@ -933,7 +1612,7 @@ export default function DesignerPortal() {
           {attachments.length > 0 && (
             <div className="flex flex-wrap gap-2 px-[var(--studio-inset-x)] pb-2">
               {attachments.map((a) => (
-                <div key={a.id} className="flex items-center gap-2 rounded-xl border border-white/15 bg-black/35 px-2 py-1 text-xs">
+                <div key={a.id} className="studio-attachment-chip">
                   {a.media_type === "VIDEO" ? <video src={a.url} className="h-11 w-16 rounded-md object-cover" muted /> : <img src={a.url} alt="" className="h-11 w-16 rounded-md object-cover" />}
                   <span className="max-w-[90px] truncate">{a.original_name}</span>
                   <button type="button" onClick={() => setAttachments((p) => p.filter((x) => x.id !== a.id))}>×</button>
@@ -942,9 +1621,9 @@ export default function DesignerPortal() {
             </div>
           )}
           {mentionOpen && mentionSuggestions.length > 0 && (
-            <ul className="studio-scroll mx-[var(--studio-inset-x)] mb-2 max-h-32 overflow-y-auto rounded-xl border border-white/15 bg-[#0c1220]">
+            <ul className="studio-mention-popover studio-scroll mx-[var(--studio-inset-x)] mb-2 max-h-32">
               {mentionSuggestions.slice(0, 8).map((a) => (
-                <li key={a.id}><button type="button" className="w-full px-3 py-2 text-left text-xs hover:bg-white/5" onClick={() => insertMention(a)}>{a.original_name}</button></li>
+                <li key={a.id}><button type="button" className="studio-mention-option" onClick={() => insertMention(a)}>{a.original_name}</button></li>
               ))}
             </ul>
           )}
@@ -968,19 +1647,6 @@ export default function DesignerPortal() {
                   <motion.button
                     type="button"
                     className="studio-composer-action"
-                    aria-label="Insert default venue map slot"
-                    title="Insert default venue map ({{selected_map_svg}})"
-                    disabled={busy}
-                    onClick={() => void insertDefaultVenueMapSlot()}
-                    whileHover={{ scale: 1.05 }}
-                    whileTap={{ scale: 0.95 }}
-                    transition={{ type: "spring", stiffness: 520, damping: 28 }}
-                  >
-                    <IconNavMap />
-                  </motion.button>
-                  <motion.button
-                    type="button"
-                    className="studio-composer-action"
                     aria-label="Voice input"
                     title="Voice input"
                     onClick={startVoice}
@@ -1000,7 +1666,8 @@ export default function DesignerPortal() {
                   onChange={(e) => setDraft(e.target.value)}
                   onInput={syncComposerTextareaHeight}
                   onKeyDown={onComposerKeyDown}
-                  placeholder="Message the design agent… @ to mention an asset"
+                  onPaste={onComposerPaste}
+                  placeholder="Message the design agent… @ to mention · paste screenshot to attach"
                   disabled={busy}
                   aria-label="Message to design agent"
                 />
@@ -1017,10 +1684,12 @@ export default function DesignerPortal() {
                   <IconSendArrow />
                 </motion.button>
               </div>
-              <p className="studio-composer-hint">Enter to send · Shift+Enter for a new line</p>
             </div>
+            <p className="studio-composer-hint">
+              Enter to send · Shift+Enter for new line · paste screenshot in box to attach
+            </p>
           </form>
-        </section>
+      </section>
 
         {!previewFullscreen && previewPanel}
         {fullscreenPreviewPortal}

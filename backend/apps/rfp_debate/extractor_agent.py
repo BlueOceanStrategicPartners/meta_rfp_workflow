@@ -34,5 +34,6 @@ class ExtractorAgent:
             system_prompt=prompt,
             user_content=document_text,
             reasoning_effort=effort,
+            fixture_kind="rfp_extraction",
         )
         return parse_extraction(raw)

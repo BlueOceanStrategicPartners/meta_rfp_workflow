@@ -1,24 +1,21 @@
 import { useState } from "react";
-import { NavLink, Route, Routes, useLocation, useNavigate } from "react-router-dom";
+import { Navigate, NavLink, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import ConfirmDialog from "./components/designer/ConfirmDialog";
 import TemplateIconButton, { IconLogout, IconMoon, IconSun } from "./components/designer/TemplateIconButton";
 import {
   IconNavAdmin,
   IconNavClient,
   IconNavDesigner,
-  IconNavMap,
 } from "./components/AppNavIcons";
 import { useAppShell } from "./context/AppShellContext";
 import { logoutDesigner } from "./lib/designerApi";
 import ClientWorkspace from "./pages/ClientWorkspace";
 import DesignerPortal from "./pages/DesignerPortal";
-import MapStudioPortal from "./pages/MapStudioPortal";
 import AdminPortal from "./pages/AdminPortal";
 
 const PRIMARY_NAV = [
   { to: "/client", label: "Client", Icon: IconNavClient },
   { to: "/designer", label: "Designer", Icon: IconNavDesigner },
-  { to: "/map", label: "Map Studio", Icon: IconNavMap },
   { to: "/admin", label: "Admin", Icon: IconNavAdmin },
 ] as const;
 
@@ -34,10 +31,9 @@ export default function App() {
         to === "/client" ? isActive || location.pathname === "/" : isActive;
       return ["app-nav-link", active ? "app-nav-link-active" : "app-nav-link-inactive"].join(" ");
     };
-  const onStudio =
-    location.pathname.startsWith("/designer") || location.pathname.startsWith("/map");
+  const onStudio = location.pathname.startsWith("/designer");
 
-  const studioLoginPath = location.pathname.startsWith("/map") ? "/map" : "/designer";
+  const studioLoginPath = "/designer";
   const [confirmLogoutOpen, setConfirmLogoutOpen] = useState(false);
   const [logoutBusy, setLogoutBusy] = useState(false);
 
@@ -109,7 +105,7 @@ export default function App() {
           <Route path="/" element={<ClientWorkspace />} />
           <Route path="/client" element={<ClientWorkspace />} />
           <Route path="/designer" element={<DesignerPortal />} />
-          <Route path="/map" element={<MapStudioPortal />} />
+          <Route path="/map" element={<Navigate to="/designer" replace />} />
           <Route path="/admin" element={<AdminPortal />} />
         </Routes>
       </main>

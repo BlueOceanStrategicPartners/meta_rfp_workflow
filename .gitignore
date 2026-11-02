@@ -3,6 +3,7 @@ dist/
 .venv/
 __pycache__/
 *.sqlite3
+backend/designer_langgraph_checkpoints.sqlite
 .env
 media/
 artifacts/

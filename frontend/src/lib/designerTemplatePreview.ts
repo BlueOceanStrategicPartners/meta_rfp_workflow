@@ -12,10 +12,52 @@ const SAMPLE_REPLACEMENTS: Record<string, string> = {
   "{{cta_accept_button}}": '<button type="button" class="proposal-cta">Accept Proposal</button>',
 };
 
+/** Scaled card previews — no scrollbars inside the iframe document. */
+const THUMBNAIL_PREVIEW_SHELL_CSS =
+  "html,body{overflow:hidden!important;height:100%!important;max-height:100%!important;}" +
+  "*{scrollbar-width:none!important;-ms-overflow-style:none!important;}" +
+  "*::-webkit-scrollbar{width:0!important;height:0!important;display:none!important;}" +
+  "*::-webkit-scrollbar-thumb,*::-webkit-scrollbar-track,*::-webkit-scrollbar-corner{" +
+  "display:none!important;background:transparent!important;width:0!important;height:0!important;" +
+  "}";
+
+/**
+ * Live preview — scroll happens on the studio shell, not inside the iframe
+ * (Windows/Chromium often paints a white track on iframe scrollbars).
+ */
+const LIVE_PREVIEW_SCROLL_PORT_CSS =
+  "html,body{overflow:hidden!important;height:auto!important;max-height:none!important;" +
+  "scrollbar-width:none!important;-ms-overflow-style:none!important;}" +
+  "*::-webkit-scrollbar{width:0!important;height:0!important;display:none!important;}";
+
+export type CompilePreviewOptions = {
+  thumbnail?: boolean;
+};
+
+function appendLivePreviewChrome(doc: string): string {
+  if (doc.includes("data-studio-live-preview-chrome")) return doc;
+  const styleTag = `<style data-studio-live-preview-chrome>${LIVE_PREVIEW_SCROLL_PORT_CSS}</style>`;
+  let out = doc;
+  if (out.includes("</head>")) {
+    out = out.replace("</head>", `${styleTag}</head>`);
+  } else {
+    out = `${styleTag}${out}`;
+  }
+  return out;
+}
+
+/** Inject live-preview scrollbar chrome into server-compiled HTML. */
+export function applyLivePreviewDocumentChrome(doc: string): string {
+  const trimmed = (doc || "").trim();
+  if (!trimmed) return doc;
+  return appendLivePreviewChrome(trimmed);
+}
+
 export function compileLocalTemplatePreview(
   html: string,
   css: string,
-  js: string
+  js: string,
+  options?: CompilePreviewOptions,
 ): string {
   let body = (html || "").trim();
   if (!body) {
@@ -26,9 +68,17 @@ export function compileLocalTemplatePreview(
       body = body.split(token).join(value);
     }
   }
+  const baseShell = "html,body{font-family:system-ui,-apple-system,sans-serif;line-height:1.5;margin:0;}";
   const styleBlock = css
-    ? `<style>${css} html,body{font-family:system-ui,-apple-system,sans-serif;line-height:1.5;margin:0;}</style>`
-    : "<style>html,body{font-family:system-ui,-apple-system,sans-serif;line-height:1.5;margin:0;}</style>";
+    ? `<style>${css} ${baseShell}</style>`
+    : `<style>${baseShell}</style>`;
+  const chromeBlock = options?.thumbnail
+    ? `<style data-studio-thumbnail-chrome>${THUMBNAIL_PREVIEW_SHELL_CSS}</style>`
+    : "";
   const scriptBlock = js ? `<script>${js}</script>` : "";
-  return `<!DOCTYPE html><html><head><meta charset="utf-8">${styleBlock}</head><body>${body}${scriptBlock}</body></html>`;
+  let doc = `<!DOCTYPE html><html><head><meta charset="utf-8">${styleBlock}${chromeBlock}</head><body>${body}${scriptBlock}</body></html>`;
+  if (!options?.thumbnail) {
+    doc = appendLivePreviewChrome(doc);
+  }
+  return doc;
 }

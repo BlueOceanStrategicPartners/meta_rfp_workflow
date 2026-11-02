@@ -2,6 +2,8 @@ from rest_framework import serializers
 
 from apps.inventory.models import InteractiveVenueMap, VenueMapZone, VenueProperty
 
+from .map_markup_guard import normalize_map_record_markup
+
 
 class VenueMapZoneSerializer(serializers.ModelSerializer):
     detail = serializers.SerializerMethodField()
@@ -55,3 +57,15 @@ class VenueMapSerializer(serializers.ModelSerializer):
             "updated_at",
         )
         read_only_fields = ("is_verified", "vectorization_confidence", "generated_html_svg")
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        cleaned, _warnings = normalize_map_record_markup(data.get("html_markup") or "")
+        data["html_markup"] = cleaned
+        return data
+
+    def validate_html_markup(self, value):
+        cleaned, warnings = normalize_map_record_markup(value or "")
+        if warnings and not cleaned:
+            raise serializers.ValidationError(warnings[0])
+        return cleaned

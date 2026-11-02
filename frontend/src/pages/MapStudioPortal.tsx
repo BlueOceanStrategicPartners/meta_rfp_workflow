@@ -62,15 +62,17 @@ import {
 import type { DesignerMediaAsset } from "../lib/designerApi";
 import { uploadMapAssetWithProgress } from "../lib/mapStudioUpload";
 import { compileLocalMapPreview } from "../lib/mapStudioPreview";
+import { applyLivePreviewDocumentChrome } from "../lib/designerTemplatePreview";
 import {
   readLastMapStudioId,
   writeLastMapStudioId,
 } from "../lib/studioLastSelection";
 import { useStudioPortalAuth } from "../hooks/useStudioPortalAuth";
+import { useLivePreviewIframeScrollPort } from "../hooks/useLivePreviewIframeScrollPort";
 import { useAppShell } from "../context/AppShellContext";
 
 const ACCEPT = "image/*,video/*";
-const COMPOSER_MAX_LINES = 4;
+const COMPOSER_MAX_LINES = 10;
 const SUGGESTED_PROMPTS = [
   "Build an interactive floorplan from the uploaded image with labeled ballroom zones",
   "Add photo galleries and descriptions to each clickable conference room",
@@ -124,6 +126,8 @@ export default function MapStudioPortal() {
   const chatEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const previewIframeRef = useRef<HTMLIFrameElement>(null);
+  const livePreviewIframeHeight = useLivePreviewIframeScrollPort(previewIframeRef, previewDoc);
   const restoredSelectionRef = useRef(false);
 
   const filteredMaps = useMemo(
@@ -344,7 +348,8 @@ export default function MapStudioPortal() {
       return;
     }
     const data = await previewVenueMap(html, css, js);
-    setPreviewDoc(data.compiled_html || compileLocalMapPreview(html, css, js));
+    const raw = data.compiled_html || compileLocalMapPreview(html, css, js);
+    setPreviewDoc(applyLivePreviewDocumentChrome(raw));
   }, [css, html, js]);
 
   useEffect(() => {
@@ -613,7 +618,7 @@ export default function MapStudioPortal() {
         className={
           fullscreen
             ? "fixed inset-0 z-[300] flex h-dvh w-dvw min-h-0 flex-col overflow-hidden bg-[#0a0f1a]"
-            : "flex min-h-0 min-w-0 flex-[1.05] flex-col overflow-hidden rounded-2xl border border-white/10 bg-white/[0.04]"
+            : "studio-shell-panel studio-live-preview-panel studio-live-preview-panel--inline"
         }
       >
         <header
@@ -635,14 +640,14 @@ export default function MapStudioPortal() {
                 </button>
               )}
             </div>
-            {renderPreviewToolbar()}
+            <div className="min-w-0 max-w-full shrink-0">{renderPreviewToolbar()}</div>
           </div>
         </header>
-        <div className={`relative min-h-0 flex-1 bg-[#1a1a1f] ${fullscreen ? "p-2 sm:p-3" : "p-4"}`}>
-          <div className="mx-auto flex h-full min-h-0 justify-center">
+        <div className={`studio-live-preview-stage ${fullscreen ? "p-2 sm:p-3" : "p-4"}`}>
+          <div className="mx-auto flex h-full w-full min-h-0 min-w-0 justify-center">
             <div
-              className={`relative h-full min-h-0 overflow-hidden border border-white/10 bg-[#ececef] shadow-inner transition-all ${
-                fullscreen && previewWidth === "full" ? "w-full rounded-none" : "rounded-xl"
+              className={`studio-live-preview-frame ${
+                fullscreen && previewWidth === "full" ? "" : "studio-live-preview-frame--rounded"
               }`}
               style={{
                 width: fullscreen && previewWidth === "full" ? "100%" : previewFrameWidth,
@@ -650,12 +655,16 @@ export default function MapStudioPortal() {
               }}
             >
               {previewDoc ? (
-                <iframe
-                  title="Venue map preview"
-                  className="absolute inset-0 h-full w-full border-0 bg-white"
-                  sandbox="allow-scripts allow-same-origin"
-                  srcDoc={previewDoc}
-                />
+                <div className="studio-live-preview-scroll">
+                  <iframe
+                    ref={previewIframeRef}
+                    title="Venue map preview"
+                    className="studio-live-preview-iframe"
+                    sandbox="allow-scripts allow-same-origin"
+                    srcDoc={previewDoc}
+                    style={{ height: livePreviewIframeHeight ?? "100%" }}
+                  />
+                </div>
               ) : (
                 <div className="absolute inset-0 flex items-center justify-center text-sm text-slate-500">
                   No preview yet
@@ -858,7 +867,7 @@ export default function MapStudioPortal() {
               </TemplateIconButton>
             </div>
           </header>
-          <div className="studio-scroll min-h-0 flex-1 space-y-3 overflow-y-auto px-[var(--studio-inset-x)] py-4">
+          <div className="studio-scroll min-h-0 flex-1 space-y-3 overflow-x-hidden overflow-y-auto px-[var(--studio-inset-x)] py-4">
             {history.length === 0 && (
               <div className="rounded-xl border border-white/10 bg-black/25 p-4 text-sm text-white/65">
                 <p className="font-medium text-white/85">Start designing</p>
@@ -889,7 +898,7 @@ export default function MapStudioPortal() {
           {uploadRows.length > 0 && (
             <div className="space-y-1 px-[var(--studio-inset-x)] pb-2">
               {uploadRows.map((u) => (
-                <div key={u.id} className="text-[10px] text-white/50">
+                <div key={u.id} className="studio-composer-upload-row">
                   {u.name} — {u.status === "uploading" ? `${u.progress}%` : u.status}
                   {u.status === "uploading" && <div className="mt-0.5 h-1 rounded bg-white/10"><div className="h-1 rounded bg-violet-500 transition-all" style={{ width: `${u.progress}%` }} /></div>}
                 </div>
@@ -897,7 +906,7 @@ export default function MapStudioPortal() {
             </div>
           )}
           {!dragActive && attachments.length === 0 && (
-            <div className="mx-[var(--studio-inset-x)] mb-2 flex items-center justify-center gap-2 rounded-xl border border-dashed border-violet-400/25 bg-violet-500/[0.06] px-3 py-3 text-center text-[11px] text-white/50">
+            <div className="studio-composer-dropzone">
               <span aria-hidden>⬆</span>
               Drag & drop images or videos here
             </div>
@@ -905,7 +914,7 @@ export default function MapStudioPortal() {
           {attachments.length > 0 && (
             <div className="flex flex-wrap gap-2 px-[var(--studio-inset-x)] pb-2">
               {attachments.map((a) => (
-                <div key={a.id} className="flex items-center gap-2 rounded-xl border border-white/15 bg-black/35 px-2 py-1 text-xs">
+                <div key={a.id} className="studio-attachment-chip">
                   {a.media_type === "VIDEO" ? <video src={a.url} className="h-11 w-16 rounded-md object-cover" muted /> : <img src={a.url} alt="" className="h-11 w-16 rounded-md object-cover" />}
                   <span className="max-w-[90px] truncate">{a.original_name}</span>
                   <button type="button" onClick={() => setAttachments((p) => p.filter((x) => x.id !== a.id))}>×</button>
@@ -914,9 +923,9 @@ export default function MapStudioPortal() {
             </div>
           )}
           {mentionOpen && mentionSuggestions.length > 0 && (
-            <ul className="studio-scroll mx-[var(--studio-inset-x)] mb-2 max-h-32 overflow-y-auto rounded-xl border border-white/15 bg-[#0c1220]">
+            <ul className="studio-mention-popover studio-scroll mx-[var(--studio-inset-x)] mb-2 max-h-32">
               {mentionSuggestions.slice(0, 8).map((a) => (
-                <li key={a.id}><button type="button" className="w-full px-3 py-2 text-left text-xs hover:bg-white/5" onClick={() => insertMention(a)}>{a.original_name}</button></li>
+                <li key={a.id}><button type="button" className="studio-mention-option" onClick={() => insertMention(a)}>{a.original_name}</button></li>
               ))}
             </ul>
           )}
@@ -976,8 +985,8 @@ export default function MapStudioPortal() {
                   <IconSendArrow />
                 </motion.button>
               </div>
-              <p className="studio-composer-hint">Enter to send · Shift+Enter for a new line</p>
             </div>
+            <p className="studio-composer-hint">Enter to send · Shift+Enter for a new line</p>
           </form>
         </section>
 

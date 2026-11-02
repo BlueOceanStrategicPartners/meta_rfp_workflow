@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from .models import DesignerMediaAsset, ProposalTemplate
+from .models import DesignerMediaAsset, DesignerAgentRule, ProposalTemplate
 
 
 class ProposalTemplateSerializer(serializers.ModelSerializer):
@@ -20,6 +20,19 @@ class ProposalTemplateSerializer(serializers.ModelSerializer):
             "created_at",
         )
         read_only_fields = ("required_placeholders_json", "created_at")
+
+
+class DesignerAgentRuleSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = DesignerAgentRule
+        fields = (
+            "id",
+            "sort_order",
+            "body",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = ("id", "created_at", "updated_at")
 
 
 class DesignerMediaAssetSerializer(serializers.ModelSerializer):

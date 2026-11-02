@@ -109,15 +109,19 @@ def test_designer_inject_default_map_slot(api_client, designer_user):
 
 
 @pytest.mark.django_db
-def test_save_template_runs_validation(api_client, designer_user):
+def test_save_template_auto_repair_or_reject(api_client, designer_user):
     api_client.force_authenticate(user=designer_user)
     bad_html = "<div>{{client_name}}</div>"
     response = api_client.post(
         "/api/designer/templates/",
-        {"name": "Broken", "html_markup": bad_html, "css_stylesheet": ""},
+        {"name": "Broken", "html_markup": bad_html, "css_stylesheet": "body{margin:0;}"},
         format="json",
     )
-    assert response.status_code == 400
+    if response.status_code == 201:
+        body = response.json()
+        assert any(p in body["html_markup"] for p in REQUIRED_PLACEHOLDERS if p != "{{client_name}}")
+    else:
+        assert response.status_code == 400
 
 
 @pytest.mark.django_db

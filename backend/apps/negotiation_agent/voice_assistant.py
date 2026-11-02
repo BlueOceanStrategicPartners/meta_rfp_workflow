@@ -1,10 +1,12 @@
 """Live negotiation voice replies via Muse Spark 1.3 + autonomous scenario scripts."""
 from __future__ import annotations
 
+import logging
+
 from django.conf import settings
 
 from apps.guardrails.validators import validate_negotiation_text
-from apps.rfp_debate.meta_client import MetaModelClient
+from apps.rfp_debate.meta_client import MetaModelAPIError, MetaModelClient
 from apps.rfp_debate.models import RFPSubmission
 
 from .voice_scenario import (
@@ -14,6 +16,8 @@ from .voice_scenario import (
     rfp_has_meaningful_cards,
 )
 from .voice_dates import voice_date_context_line
+
+logger = logging.getLogger(__name__)
 
 
 def generate_voice_assistant_reply(message: str, *, rfp_status: str | None = None) -> str:
@@ -71,11 +75,13 @@ def generate_voice_assistant_reply_for_rfp(
                 "Use warm, concise language. Never mention internal tools, AI models, agents, "
                 "debates, verification pipelines, floor prices, anchor pricing jargon, or card UI mechanics. "
                 "Offer help with dates, room block, meeting space, quotes, venue map, approval, or negotiation. "
-                'JSON only: {"reply": "..."} with one or two short spoken sentences.'
+                'Return JSON with key "reply" containing one or two short spoken sentences.'
             ),
             user_content=f"{context}\nUser: {cleaned}",
+            fixture_kind="voice_reply",
         )
-    except Exception:
+    except (MetaModelAPIError, Exception) as exc:
+        logger.debug("Voice Muse reply fallback to script: %s", exc)
         return scripted
     if isinstance(raw, dict):
         reply = raw.get("reply") or raw.get("message")

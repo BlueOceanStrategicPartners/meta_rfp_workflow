@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import html as html_module
+import re
 from typing import Any
 
 from apps.inventory.models import InteractiveVenueMap
@@ -17,8 +18,13 @@ MAP_SECTION_SNIPPET = (
     "<section class='venue-map-proposal' aria-label='Interactive venue map'>"
     "<h2>Venue map</h2>"
     "<div class='venue-map-slot'>{{selected_map_svg}}</div>"
-    "<p class='venue-map-caption'>Default property map — updates when Map Studio default changes.</p>"
+    "<p class='venue-map-caption'>Default property map — updates when the default venue map changes.</p>"
     "</section>"
+)
+
+_VENUE_MAP_SECTION_RE = re.compile(
+    r"<section[^>]*\bvenue-map-proposal\b[^>]*>.*?</section>",
+    re.DOTALL | re.IGNORECASE,
 )
 
 
@@ -57,22 +63,66 @@ def default_map_embed_for_proposal() -> str | None:
     return embed_compiled_map_document(compiled)
 
 
-def build_default_map_agent_context() -> str:
+def build_map_library_summary(user) -> str:
+    """Short list of saved maps for the design agent."""
+    from apps.inventory.models import InteractiveVenueMap
+
+    qs = InteractiveVenueMap.objects.all().order_by("-updated_at")
+    if getattr(user, "role", None) != "ADMIN":
+        qs = qs.filter(created_by=user)
+    maps = list(qs[:12])
+    if not maps:
+        return "MAP LIBRARY: (empty — user can create maps via chat or floorplan upload.)"
+    lines = []
+    for m in maps:
+        flag = " [DEFAULT]" if m.is_default else ""
+        revs = len(m.revision_history_json or [])
+        lines.append(f"  - {m.id} | {m.title}{flag} | {revs} revision(s)")
+    return (
+        "MAP LIBRARY (manage via chat: list maps, set default, delete map; "
+        "or Venue maps panel in Live preview):\n" + "\n".join(lines)
+    )
+
+
+def remove_map_slot_from_template(html_markup: str) -> str:
+    """Remove venue map section / placeholder from proposal HTML (library maps unchanged)."""
+    html = html_markup or ""
+    cleaned, n = _VENUE_MAP_SECTION_RE.subn("", html, count=1)
+    if n:
+        return cleaned.strip()
+    if "{{selected_map_svg}}" not in html:
+        return html
+    html = html.replace(MAP_SECTION_SNIPPET, "")
+    html = re.sub(
+        r"<div[^>]*\bvenue-map-slot\b[^>]*>\s*\{\{selected_map_svg\}\}\s*</div>",
+        "",
+        html,
+        count=1,
+        flags=re.IGNORECASE,
+    )
+    html = html.replace("{{selected_map_svg}}", "")
+    return html.strip()
+
+
+def build_default_map_agent_context(user=None) -> str:
     venue_map = get_default_venue_map()
     if not venue_map:
-        return (
+        base = (
             "SYSTEM VENUE MAP: none marked is_default. "
-            "Tell the designer to publish a map in Map Studio and set it as default. "
-            "Still include {{selected_map_svg}} inside .venue-map-slot for when a map exists."
+            "User can create maps in chat or use Venue maps in Live preview. "
+            "Still include {{selected_map_svg}} inside .venue-map-slot when they want a map section."
         )
+        if user is not None:
+            base = base + "\n" + build_map_library_summary(user)
+        return base
     locations = default_map_locations(venue_map)
     loc_lines = [
         f"  - {loc.get('id')}: {loc.get('label')} — {(loc.get('description') or '')[:120]}"
         for loc in locations[:12]
     ]
     markup_preview = (venue_map.html_markup or "")[:1200]
-    return (
-        "SYSTEM DEFAULT VENUE MAP (Map Studio, is_default=true):\n"
+    base = (
+        "SYSTEM DEFAULT VENUE MAP (is_default=true):\n"
         f"- map_id: {venue_map.id}\n"
         f"- title: {venue_map.title}\n"
         f"- locations ({len(locations)}):\n"
@@ -86,8 +136,13 @@ def build_default_map_agent_context() -> str:
         "- Add CSS for .venue-map-slot and iframe (min-height ~420px, width 100%, rounded corners).\n"
         "- When the user asks to show, fix, or add the map, ensure that section + token exist; "
         "merge map slot CSS into css_stylesheet if missing.\n"
+        "- Map library actions (list / delete / set default / remove from proposal) are handled by the platform — "
+        "do not ask the user to use a separate Map Studio.\n"
         f"- Reference markup excerpt (for structure only, do not duplicate ids blindly):\n{markup_preview}\n"
     )
+    if user is not None:
+        base = base + "\n" + build_map_library_summary(user) + "\n"
+    return base
 
 
 def inject_map_section_into_template(html_markup: str, css_stylesheet: str) -> dict[str, str]:
@@ -110,7 +165,7 @@ def inject_map_section_into_template(html_markup: str, css_stylesheet: str) -> d
 def default_map_designer_payload() -> dict[str, Any]:
     venue_map = get_default_venue_map()
     if not venue_map:
-        return {"available": False, "detail": "No default venue map. Set one in Map Studio."}
+        return {"available": False, "detail": "No default venue map. Create one via the Design Agent."}
     locations = default_map_locations(venue_map)
     compiled = compile_interactive_map(
         venue_map.html_markup,

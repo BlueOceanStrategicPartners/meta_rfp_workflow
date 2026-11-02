@@ -39,6 +39,7 @@ class CriticAgent:
             user_content=(
                 f"CROSS-EXAMINE\nSource:\n{document_text}\n\nExtraction:\n{extraction.model_dump_json()}"
             ),
+            fixture_kind="rfp_critique",
         )
         result = parse_critique(raw)
         if flags:

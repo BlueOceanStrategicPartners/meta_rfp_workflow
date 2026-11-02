@@ -129,7 +129,35 @@ body {
   }
 
   .studio-panel-header {
-    @apply shrink-0 border-b border-white/10 px-[var(--studio-inset-x)] py-4 min-h-[4.75rem] flex items-center justify-between gap-3;
+    @apply shrink-0 flex min-h-[4.75rem] flex-wrap items-center justify-between gap-3 border-b border-white/10 px-[var(--studio-inset-x)] py-4;
+  }
+
+  .studio-panel-header > :first-child {
+    @apply min-w-0 flex-1 basis-[12rem];
+  }
+
+  .studio-panel-header > .studio-toolbar {
+    @apply max-w-full min-w-0 shrink-0 flex-wrap justify-end;
+  }
+
+  .studio-panel-subtitle {
+    @apply text-xs text-white/50;
+  }
+
+  .studio-panel-kicker {
+    @apply text-[10px] uppercase tracking-widest text-white/45;
+  }
+
+  .studio-field-search-icon {
+    @apply pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-xs text-white/35;
+  }
+
+  .studio-empty-list {
+    @apply rounded-xl border border-dashed border-white/15 px-3 py-6 text-center text-xs text-white/45;
+  }
+
+  .studio-suggest-chip {
+    @apply rounded-full border border-white/15 px-3 py-1 text-xs text-white/80 hover:bg-violet-500/10;
   }
 
   .studio-panel-body {
@@ -149,37 +177,44 @@ body {
   }
 
   .studio-composer-unified:focus-within {
-    border-color: rgba(255, 255, 255, 0.15);
-    box-shadow: 0 10px 40px -14px rgba(0, 0, 0, 0.65), inset 0 1px 0 rgba(255, 255, 255, 0.07);
+    border-color: rgba(167, 139, 250, 0.35);
+    box-shadow:
+      0 10px 40px -14px rgba(0, 0, 0, 0.65),
+      inset 0 1px 0 rgba(255, 255, 255, 0.07),
+      0 0 0 1px rgba(139, 92, 246, 0.2);
   }
 
+  .studio-composer-unified *:focus,
   .studio-composer-unified *:focus-visible {
-    outline: none;
-    box-shadow: none;
-    --tw-ring-shadow: 0 0 #0000;
+    outline: none !important;
+    box-shadow: none !important;
+    --tw-ring-shadow: 0 0 #0000 !important;
+    --tw-ring-offset-width: 0 !important;
+    --tw-ring-offset-color: transparent !important;
   }
 
   .studio-composer-row {
-    @apply flex w-full items-stretch gap-0;
+    @apply flex w-full items-end gap-1 px-1.5 py-1.5;
   }
 
   .studio-composer-icons {
-    @apply flex shrink-0 items-end gap-0 border-r border-white/10 px-1 py-1;
+    @apply flex shrink-0 items-center gap-0.5 self-end border-r border-white/10 pr-1.5;
   }
 
   .studio-composer-input {
-    @apply min-h-[2.75rem] min-w-0 flex-1 resize-none overflow-y-hidden border-0 bg-transparent px-2.5 py-2 text-sm leading-snug text-white placeholder:text-white/35 outline-none ring-0 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0;
+    @apply min-h-9 max-h-60 min-w-0 flex-1 resize-none overflow-y-hidden border-0 bg-transparent px-2 py-1.5 text-sm leading-normal text-white shadow-none placeholder:text-white/35 outline-none ring-0 ring-offset-0 focus:border-0 focus:outline-none focus:ring-0 focus:ring-offset-0 focus-visible:border-0 focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0;
+    appearance: none;
+    -webkit-appearance: none;
   }
 
   .studio-composer-hint {
-    @apply border-t border-white/[0.06] px-3 py-1.5 text-[10px] text-white/30;
+    @apply mt-1.5 px-1 text-[10px] text-white/30;
   }
 
   .studio-composer-input--scroll {
     overflow-y: auto;
     scrollbar-width: thin;
     scrollbar-color: rgba(167, 139, 250, 0.45) transparent;
-    scrollbar-gutter: stable;
   }
 
   .studio-composer-input--scroll::-webkit-scrollbar {
@@ -209,11 +244,27 @@ body {
   }
 
   .studio-composer-action {
-    @apply inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-white/60 transition-colors hover:bg-white/[0.08] hover:text-white disabled:pointer-events-none disabled:opacity-40;
+    @apply inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-white/60 transition-colors hover:bg-white/[0.08] hover:text-white disabled:pointer-events-none disabled:opacity-40;
+  }
+
+  .studio-composer-dropzone {
+    @apply mx-[var(--studio-inset-x)] mb-2 flex items-center justify-center gap-2 rounded-xl border border-dashed border-violet-400/25 bg-violet-500/[0.06] px-3 py-3 text-center text-[11px] text-white/55;
+  }
+
+  .studio-composer-upload-row {
+    @apply text-[10px] text-white/55;
+  }
+
+  .studio-attachment-chip {
+    @apply flex items-center gap-2 rounded-xl border border-white/15 bg-black/35 px-2 py-1 text-xs text-white/90;
+  }
+
+  .studio-mention-option {
+    @apply w-full px-3 py-2 text-left text-xs text-white/85 hover:bg-white/5;
   }
 
   .studio-composer-send {
-    @apply inline-flex w-11 shrink-0 items-center justify-center self-stretch border-l border-white/10 bg-gradient-to-b from-violet-600 to-fuchsia-600 text-white transition hover:opacity-95 disabled:opacity-40;
+    @apply inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-violet-600 to-fuchsia-600 text-white shadow-[0_4px_14px_-4px_rgba(139,92,246,0.65)] transition hover:brightness-110 disabled:opacity-40;
   }
 
   .studio-field {
@@ -241,11 +292,16 @@ body {
   }
 
   .studio-toolbar {
-    @apply flex shrink-0 flex-nowrap items-center gap-1.5;
+    @apply flex max-w-full min-w-0 shrink items-center gap-1.5;
   }
 
   .studio-preview-toolbar {
-    @apply studio-toolbar rounded-xl border border-violet-500/30 bg-gradient-to-b from-violet-500/[0.14] via-white/[0.05] to-transparent p-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.08),0_8px_28px_-10px_rgba(124,58,237,0.45)];
+    @apply studio-toolbar max-w-full flex-wrap justify-end rounded-xl border border-violet-500/30 bg-gradient-to-b from-violet-500/[0.14] via-white/[0.05] to-transparent p-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.08),0_8px_28px_-10px_rgba(124,58,237,0.45)];
+  }
+
+  .studio-chat-markdown {
+    overflow-wrap: anywhere;
+    word-break: break-word;
   }
 
   .studio-preview-toolbar-divider {
@@ -261,15 +317,391 @@ body {
   }
 
   .studio-template-card-preview {
-    @apply relative aspect-[5/3] w-full overflow-hidden border-b border-white/10 bg-[#e8e9ed];
+    @apply relative aspect-[5/3] w-full overflow-hidden border-b border-white/10 bg-[#1a1f2e];
+  }
+
+  .studio-template-card-preview-inset {
+    @apply absolute inset-2 overflow-hidden rounded-lg border shadow-[inset_0_0_0_1px_rgba(15,23,42,0.08)];
+    border-color: rgb(61 68 84 / 0.75);
+    background-color: #0c0f18;
+  }
+
+  .studio-template-card-preview-inset::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 10px;
+    pointer-events: none;
+    z-index: 1;
+    background: linear-gradient(to left, #0c0f18 35%, transparent);
+  }
+
+  .studio-live-preview-frame {
+    @apply relative flex h-full min-h-0 w-full max-w-full flex-col overflow-hidden border shadow-inner transition-all;
+    border-color: rgb(61 68 84 / 0.9);
+    background-color: #0a0c12;
+  }
+
+  .studio-live-preview-frame--rounded {
+    @apply rounded-xl;
+  }
+
+  .studio-live-preview-scroll {
+    @apply h-full min-h-0 flex-1 overflow-x-hidden overflow-y-auto;
+    background-color: #0a0c12;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.52) rgb(22 26 38);
+  }
+
+  .studio-live-preview-scroll::-webkit-scrollbar {
+    width: 10px;
+  }
+
+  .studio-live-preview-scroll::-webkit-scrollbar-track {
+    background: linear-gradient(
+      to bottom,
+      rgb(10 12 18 / 0.35) 0%,
+      rgb(32 36 50 / 0.92) 14%,
+      rgb(32 36 50 / 0.92) 86%,
+      rgb(10 12 18 / 0.35) 100%
+    );
+  }
+
+  .studio-live-preview-scroll::-webkit-scrollbar-thumb {
+    border-radius: 999px;
+    min-height: 44px;
+    border: 2px solid rgb(22 26 38);
+    background-color: rgba(255, 255, 255, 0.52);
+  }
+
+  .studio-live-preview-scroll::-webkit-scrollbar-thumb:hover {
+    background-color: rgba(255, 255, 255, 0.72);
+  }
+
+  .studio-live-preview-iframe {
+    @apply block w-full border-0;
+    background-color: transparent;
+  }
+
+  .studio-shell-panel {
+    @apply overflow-hidden rounded-2xl border border-white/10 bg-white/[0.04];
+  }
+
+  .studio-live-preview-panel {
+    @apply flex min-h-0 min-w-0 flex-col;
+  }
+
+  .studio-live-preview-panel--inline {
+    @apply flex-[1.05];
+  }
+
+  .studio-live-preview-stage {
+    @apply relative min-h-0 flex-1 overflow-hidden bg-[#1a1a1f];
+  }
+
+  .studio-agent-progress-card {
+    @apply w-full min-w-0 max-w-[min(100%,26rem)] rounded-2xl border border-violet-400/30 bg-gradient-to-br from-violet-950/50 to-[#0c1220]/80 p-3 shadow-lg shadow-violet-900/20;
+  }
+
+  .studio-chat-empty {
+    @apply rounded-xl border border-white/10 bg-black/25 p-4 text-sm text-white/65;
+  }
+
+  .studio-mention-popover {
+    @apply mx-[var(--studio-inset-x)] mb-2 max-h-32 overflow-y-auto rounded-xl border border-white/15 bg-[#0c1220];
+  }
+
+  /* Light theme — Designing Studio shell */
+  html[data-theme="light"] .designer-shell-light .studio-panel-header {
+    @apply border-slate-200/90;
+  }
+
+  html[data-theme="light"] .designer-shell-light .studio-panel-header h2,
+  html[data-theme="light"] .designer-shell-light .studio-panel-header .font-semibold {
+    @apply text-slate-900;
+  }
+
+  html[data-theme="light"] .designer-shell-light .studio-panel-body label,
+  html[data-theme="light"] .designer-shell-light .studio-panel-header p,
+  html[data-theme="light"] .designer-shell-light .studio-panel-subtitle,
+  html[data-theme="light"] .designer-shell-light .studio-panel-kicker,
+  html[data-theme="light"] .designer-shell-light .studio-field-search-icon,
+  html[data-theme="light"] .designer-shell-light .studio-empty-list {
+    @apply text-slate-600;
+  }
+
+  html[data-theme="light"] .designer-shell-light .studio-empty-list {
+    @apply border-slate-200 text-slate-500;
+  }
+
+  html[data-theme="light"] .designer-shell-light .studio-suggest-chip {
+    @apply border-slate-200 text-slate-700 hover:bg-violet-50;
+  }
+
+  html[data-theme="light"] .designer-shell-light .studio-shell-panel {
+    @apply border-slate-200/90 bg-white/80 shadow-sm;
+  }
+
+  html[data-theme="light"] .designer-shell-light .studio-field {
+    @apply border-slate-200 bg-slate-50 text-slate-900 placeholder:text-slate-400 focus:border-violet-400/50 focus:ring-violet-400/20;
+  }
+
+  html[data-theme="light"] .designer-shell-light .studio-btn-secondary {
+    @apply border-slate-200 bg-white text-slate-800 hover:bg-slate-50;
+  }
+
+  html[data-theme="light"] .designer-shell-light .studio-composer {
+    @apply border-slate-200/90 bg-white/90;
+  }
+
+  html[data-theme="light"] .designer-shell-light .studio-composer-unified {
+    @apply border-slate-200 bg-white shadow-[0_8px_30px_-12px_rgba(15,23,42,0.15)];
+  }
+
+  html[data-theme="light"] .designer-shell-light .studio-composer-unified:focus-within {
+    border-color: rgba(139, 92, 246, 0.45);
+    box-shadow:
+      0 8px 30px -12px rgba(15, 23, 42, 0.12),
+      0 0 0 1px rgba(139, 92, 246, 0.25);
+  }
+
+  html[data-theme="light"] .designer-shell-light .studio-composer-icons {
+    @apply border-slate-200;
+  }
+
+  html[data-theme="light"] .designer-shell-light .studio-composer-input {
+    @apply text-slate-900 placeholder:text-slate-400;
+  }
+
+  html[data-theme="light"] .designer-shell-light .studio-composer-hint {
+    @apply text-slate-600;
+  }
+
+  html[data-theme="light"] .designer-shell-light .studio-composer-action {
+    @apply text-slate-500 hover:bg-slate-100 hover:text-slate-800;
+  }
+
+  html[data-theme="light"] .designer-shell-light .studio-composer-dropzone {
+    @apply border-violet-300/60 bg-violet-50 text-slate-600;
+  }
+
+  html[data-theme="light"] .designer-shell-light .studio-composer-upload-row {
+    @apply text-slate-600;
+  }
+
+  html[data-theme="light"] .designer-shell-light .studio-attachment-chip {
+    @apply border-slate-200 bg-white text-slate-800;
+  }
+
+  html[data-theme="light"] .designer-shell-light .studio-mention-option {
+    @apply text-slate-800 hover:bg-violet-50;
+  }
+
+  html[data-theme="light"] .designer-shell-light .studio-preview-toolbar {
+    @apply border-violet-200/80 bg-gradient-to-b from-violet-50 via-white to-white shadow-sm;
+  }
+
+  html[data-theme="light"] .designer-shell-light .studio-preview-toolbar-divider {
+    @apply bg-slate-200;
+  }
+
+  html[data-theme="light"] .designer-shell-light .studio-live-preview-stage {
+    @apply bg-slate-200/90;
+  }
+
+  html[data-theme="light"] .designer-shell-light .studio-live-preview-frame {
+    border-color: rgb(148 163 184 / 0.65);
+    background-color: #0a0c12;
+  }
+
+  html[data-theme="light"] .designer-shell-light .studio-live-preview-scroll {
+    background-color: #94a3b8;
+    scrollbar-color: rgb(30 41 59) rgb(203 213 225);
+  }
+
+  html[data-theme="light"] .designer-shell-light .studio-live-preview-scroll::-webkit-scrollbar-track {
+    background: linear-gradient(
+      to bottom,
+      rgb(226 232 240 / 0.55) 0%,
+      rgb(148 163 184 / 0.75) 14%,
+      rgb(148 163 184 / 0.75) 86%,
+      rgb(226 232 240 / 0.55) 100%
+    );
+  }
+
+  html[data-theme="light"] .designer-shell-light .studio-live-preview-scroll::-webkit-scrollbar-thumb {
+    background-color: rgb(30 41 59);
+    border: 2px solid rgb(203 213 225);
+  }
+
+  html[data-theme="light"] .designer-shell-light .studio-live-preview-scroll::-webkit-scrollbar-thumb:hover {
+    background-color: rgb(15 23 42);
+  }
+
+  .studio-progress-kicker {
+    @apply text-[10px] font-semibold uppercase tracking-wide text-violet-200/80;
+  }
+
+  .studio-progress-headline {
+    @apply text-xs leading-snug text-white/85;
+  }
+
+  .studio-progress-hint {
+    @apply mb-1.5 text-[10px] text-white/40;
+  }
+
+  .studio-progress-step-active {
+    @apply bg-violet-500/10 text-white/90;
+  }
+
+  .studio-progress-step-done {
+    @apply text-emerald-100/85;
+  }
+
+  .studio-progress-step-pending {
+    @apply text-white/50;
+  }
+
+  .studio-progress-step-skipped {
+    @apply text-white/30 line-through;
+  }
+
+  .studio-chat-bubble--agent {
+    @apply border border-white/10 bg-white/[0.06];
+  }
+
+  .studio-chat-bubble-meta {
+    @apply mb-1 flex min-w-0 items-center justify-between gap-2 text-[10px] uppercase tracking-wide text-white/45;
+  }
+
+  html[data-theme="light"] .designer-shell-light .studio-template-card {
+    @apply border-slate-200/90 bg-slate-50/90 hover:border-slate-300 hover:bg-white;
+  }
+
+  html[data-theme="light"] .designer-shell-light .studio-template-card--active {
+    @apply border-violet-400/50 bg-violet-50 ring-violet-300/40;
+  }
+
+  html[data-theme="light"] .designer-shell-light .studio-template-card-meta .truncate {
+    @apply text-slate-900;
+  }
+
+  html[data-theme="light"] .designer-shell-light .studio-template-card-meta time,
+  html[data-theme="light"] .designer-shell-light .studio-template-card-meta .text-white\/40 {
+    @apply text-slate-500;
+  }
+
+  html[data-theme="light"] .designer-shell-light .studio-template-card-actions-row {
+    @apply border-slate-200;
+  }
+
+  html[data-theme="light"] .designer-shell-light .studio-agent-progress-card {
+    @apply border-violet-200 bg-gradient-to-br from-violet-50 to-white text-slate-900 shadow-violet-200/40;
+  }
+
+  html[data-theme="light"] .designer-shell-light .studio-agent-progress-card .studio-progress-kicker {
+    @apply text-violet-700/90;
+  }
+
+  html[data-theme="light"] .designer-shell-light .studio-agent-progress-card .studio-progress-headline,
+  html[data-theme="light"] .designer-shell-light .studio-agent-progress-card .studio-progress-step-active,
+  html[data-theme="light"] .designer-shell-light .studio-agent-progress-card .studio-progress-step-done,
+  html[data-theme="light"] .designer-shell-light .studio-agent-progress-card .studio-progress-step-pending,
+  html[data-theme="light"] .designer-shell-light .studio-agent-progress-card .studio-progress-step-skipped,
+  html[data-theme="light"] .designer-shell-light .studio-agent-progress-card .studio-progress-hint {
+    @apply text-slate-700;
+  }
+
+  html[data-theme="light"] .designer-shell-light .studio-agent-progress-card .studio-progress-step-active {
+    @apply bg-violet-100 text-slate-900;
+  }
+
+  html[data-theme="light"] .designer-shell-light .studio-agent-progress-card .studio-progress-step-done {
+    @apply text-emerald-800;
+  }
+
+  html[data-theme="light"] .designer-shell-light .studio-agent-progress-card .studio-progress-step-pending {
+    @apply text-slate-500;
+  }
+
+  html[data-theme="light"] .designer-shell-light .studio-agent-progress-card .studio-progress-step-skipped {
+    @apply text-slate-400;
+  }
+
+  html[data-theme="light"] .designer-shell-light .studio-chat-bubble--agent {
+    @apply border-slate-200 bg-white text-slate-800 shadow-sm;
+  }
+
+  html[data-theme="light"] .designer-shell-light .studio-chat-bubble--agent .studio-chat-bubble-meta {
+    @apply text-slate-500;
+  }
+
+  html[data-theme="light"] .designer-shell-light .studio-chat-bubble--agent .studio-chat-markdown {
+    @apply text-slate-800;
+  }
+
+  html[data-theme="light"] .designer-shell-light .studio-chat-bubble--agent .studio-chat-markdown .md-code,
+  html[data-theme="light"] .designer-shell-light .studio-chat-bubble--agent .studio-chat-markdown .md-pre {
+    @apply bg-slate-100 text-slate-800;
+  }
+
+  html[data-theme="light"] .designer-shell-light .studio-preview-toolbar .studio-icon-btn {
+    @apply border-slate-200 bg-white text-slate-600 hover:border-violet-300 hover:bg-violet-50 hover:text-violet-800;
+  }
+
+  html[data-theme="light"] .designer-shell-light .studio-toolbar .studio-icon-btn {
+    @apply border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900;
+  }
+
+  html[data-theme="light"] .designer-shell-light .studio-agent-progress-card .text-violet-200\/80 {
+    @apply text-violet-700/80;
+  }
+
+  html[data-theme="light"] .designer-shell-light .studio-chat-empty {
+    @apply border-slate-200 bg-slate-50 text-slate-600;
+  }
+
+  html[data-theme="light"] .designer-shell-light .studio-chat-empty .text-white\/85 {
+    @apply text-slate-800;
+  }
+
+  html[data-theme="light"] .designer-shell-light .studio-mention-popover {
+    @apply border-slate-200 bg-white;
+  }
+
+  html[data-theme="light"] .designer-shell-light .studio-icon-btn:focus-visible {
+    @apply ring-offset-white;
+  }
+
+  html[data-theme="light"] .designer-shell-light .studio-live-preview-panel > header {
+    @apply border-slate-200/90;
+  }
+
+  html[data-theme="light"] .designer-shell-light .studio-live-preview-panel > header h2 {
+    @apply text-slate-900;
+  }
+
+  html[data-theme="light"] .designer-shell-light .studio-template-card-preview-inset::after {
+    background: linear-gradient(to left, #0c0f18 35%, transparent);
   }
 
   .studio-template-card-iframe {
-    @apply pointer-events-none absolute left-0 top-0 border-0 bg-white;
+    @apply pointer-events-none absolute left-0 top-0 border-0;
     width: 400%;
     height: 400%;
     transform: scale(0.25);
     transform-origin: top left;
+    overflow: clip;
+    scrollbar-width: none;
+    background-color: #0c0f18;
+  }
+
+  .studio-template-card-iframe::-webkit-scrollbar {
+    display: none;
+    width: 0;
+    height: 0;
   }
 
   .studio-template-card-empty {
@@ -278,6 +710,14 @@ body {
 
   .studio-template-card-meta {
     @apply px-2.5 py-2;
+  }
+
+  .studio-template-card-footer {
+    @apply pb-2.5;
+  }
+
+  .studio-template-card-actions-row .studio-icon-btn {
+    @apply min-h-0 flex-none;
   }
 
   .studio-token-chip {

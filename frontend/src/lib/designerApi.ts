@@ -1,10 +1,24 @@
 import { apiFetch } from "./apiClient";
 import { clearAuthTokens, setAuthTokens } from "./authTokens";
 
+import type { AgentWorkPlanStep } from "./designerChatStream";
+
+export type DesignerChatActionState = {
+  partial_completion?: boolean;
+  continuation_recommended?: boolean;
+  remaining_items?: string[];
+  progress_completed?: Array<{ id: string; label: string; ok: boolean }>;
+  clarification_options?: string[];
+  agent_todos?: AgentWorkPlanStep[];
+  /** User closed the Continue / action card — do not restore on reload. */
+  dismissed?: boolean;
+};
+
 export type ChatMessage = {
   role: "user" | "assistant";
   content: string;
   ts?: string;
+  action_state?: DesignerChatActionState;
 };
 
 export type TemplateRevision = {
@@ -45,6 +59,23 @@ export async function authMe() {
   return res.json();
 }
 
+export type DesignerLiveProgress = {
+  active: boolean;
+  agent_todos?: AgentWorkPlanStep[];
+  work_plan?: AgentWorkPlanStep[];
+  tool_steps?: Array<{ tool?: string; label?: string; ok?: boolean; phase?: string }>;
+  preview?: { html_markup?: string; css_stylesheet?: string; js_script?: string };
+};
+
+/** Poll fallback while SSE POST stream is buffered in some browsers. */
+export async function fetchDesignerLiveProgress(): Promise<DesignerLiveProgress> {
+  const res = await apiFetch("/api/designer/chat/live-progress/");
+  if (!res.ok) {
+    return { active: false, agent_todos: [], work_plan: [], tool_steps: [] };
+  }
+  return res.json() as Promise<DesignerLiveProgress>;
+}
+
 export type LoginSessionPayload = {
   email: string;
   role: string;
@@ -73,7 +104,10 @@ export async function loginDesigner(
       if (res.status === 403) {
         detail = "Login blocked (CSRF). Refresh the page and try again.";
       } else if (res.status >= 500 || res.status === 502 || res.status === 504) {
-        detail = "API server error. Start the backend (port 8000) and try again.";
+        detail =
+          "API server error (HTTP " +
+          res.status +
+          "). The backend on port 8000 may have crashed during autoreload — restart scripts/dev-backend.ps1 and try again.";
       } else if (res.status === 0 || res.type === "opaque") {
         detail = "Cannot reach the API. Run the dev backend and use http://127.0.0.1:5173.";
       }
@@ -120,6 +154,22 @@ export async function uploadDesignerAsset(file: File, templateId?: string | null
   return res.json() as Promise<DesignerMediaAsset>;
 }
 
+function formatApiError(err: unknown, fallback: string): string {
+  if (typeof err === "string") return err;
+  if (err && typeof err === "object") {
+    const o = err as Record<string, unknown>;
+    if (typeof o.detail === "string") return o.detail;
+    if (Array.isArray(o.detail)) return o.detail.map(String).join("; ");
+    const parts: string[] = [];
+    for (const [key, val] of Object.entries(o)) {
+      if (Array.isArray(val)) parts.push(`${key}: ${val.join(", ")}`);
+      else if (typeof val === "string") parts.push(val);
+    }
+    if (parts.length) return parts.join("; ");
+  }
+  return fallback;
+}
+
 export async function saveTemplate(payload: Partial<ProposalTemplate> & { name: string }) {
   const res = await apiFetch("/api/designer/templates/", {
     method: "POST",
@@ -127,9 +177,7 @@ export async function saveTemplate(payload: Partial<ProposalTemplate> & { name: 
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(
-      typeof err === "string" ? err : err.detail || JSON.stringify(err) || "Save failed"
-    );
+    throw new Error(formatApiError(err, "Save failed"));
   }
   return res.json();
 }
@@ -141,7 +189,7 @@ export async function updateTemplate(id: string, payload: Partial<ProposalTempla
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || JSON.stringify(err) || "Update failed");
+    throw new Error(formatApiError(err, "Update failed"));
   }
   return res.json();
 }
@@ -183,7 +231,59 @@ export type DesignerChatResponse = {
   clarification_options?: string[];
   history: ChatMessage[];
   used_fixture: boolean;
+  map_stage_applied?: boolean;
+  venue_map_id?: string;
+  venue_map_title?: string;
+  validation_warnings?: string[];
+  self_check?: { valid: boolean; issues: string[]; repair_passes?: number };
+  venue_maps_action?: string;
+  venue_maps?: Array<{
+    id: string;
+    title: string;
+    is_default: boolean;
+    updated_at: string;
+    revision_count: number;
+  }>;
+  preview_audit_findings?: Array<{ code: string; message: string; severity: string }>;
+  attachment_required?: boolean;
+  preview_automation_used?: boolean;
+  request_preview_automation?: boolean;
+  work_plan?: AgentWorkPlanStep[];
+  agent_todos?: AgentWorkPlanStep[];
+  agent_mode?: string;
+  tool_steps?: number;
+  tool_trace?: Array<Record<string, unknown>>;
+  tool_loop_exhausted?: boolean;
+  continuation_recommended?: boolean;
+  partial_completion?: boolean;
+  remaining_items?: string[];
+  progress_completed?: Array<{ id: string; label: string; ok: boolean }>;
+  model_api_error?: boolean;
 };
+
+export type PreviewAutomationReport = {
+  ok: boolean;
+  error?: string;
+  duration_ms: number;
+  viewport: { w: number; h: number };
+  scroll: { docHeight: number; canScroll: boolean };
+  elements: {
+    heroVisible: boolean;
+    ctaVisible: boolean;
+    mapPopupOpenOnLoad: boolean;
+    mapZoneCount: number;
+  };
+  interactions: Array<{ action: string; ok: boolean; detail?: string }>;
+};
+
+export async function auditDesignerPreview(html_markup: string, css_stylesheet: string, js_script: string) {
+  const res = await apiFetch("/api/designer/preview-audit/", {
+    method: "POST",
+    body: JSON.stringify({ html_markup, css_stylesheet, js_script }),
+  });
+  if (!res.ok) throw new Error("Preview audit failed");
+  return res.json() as Promise<{ findings: Array<{ code: string; message: string; severity: string }> }>;
+}
 
 export async function designerChat(body: {
   message: string;
@@ -193,6 +293,9 @@ export async function designerChat(body: {
   js_script: string;
   attachment_ids?: string[];
   template_id?: string;
+  include_preview_audit?: boolean;
+  preview_automation_report?: PreviewAutomationReport | null;
+  preview_automation_depth?: number;
 }): Promise<DesignerChatResponse> {
   const res = await apiFetch("/api/designer/chat/", {
     method: "POST",
@@ -259,6 +362,15 @@ export async function injectDefaultVenueMapIntoTemplate(
   });
   if (!res.ok) throw new Error("Could not insert default venue map slot");
   return res.json();
+}
+
+export async function removeVenueMapSlotFromProposal(html_markup: string, css_stylesheet: string) {
+  const res = await apiFetch("/api/designer/remove-venue-map-slot/", {
+    method: "POST",
+    body: JSON.stringify({ html_markup, css_stylesheet }),
+  });
+  if (!res.ok) throw new Error("Could not remove map from proposal");
+  return res.json() as Promise<{ html_markup: string; css_stylesheet: string }>;
 }
 
 export function downloadJson(filename: string, data: unknown) {

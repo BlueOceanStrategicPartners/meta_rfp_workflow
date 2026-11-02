@@ -5,13 +5,15 @@ from apps.core.exceptions import TemplateValidationException
 from apps.designer_studio.models import REQUIRED_PLACEHOLDERS
 from apps.guardrails.validators import lint_required_placeholders, sanitize_template_html
 
+from .template_alignment import cta_hidden_by_css_issue
+
 SAMPLE_REPLACEMENTS = {
     "{{client_name}}": "Acme Corporation",
-    "{{event_dates}}": "2026-06-01 — 2026-06-04",
+    "{{event_dates}}": "06/01/2026 — 06/04/2026",
     "{{verified_room_blocks}}": (
         "<table><tr><th>Date</th><th>Rooms</th></tr>"
-        "<tr><td>2026-06-01</td><td>60 King</td></tr>"
-        "<tr><td>2026-06-02</td><td>60 King</td></tr></table>"
+        "<tr><td>06/01/2026</td><td>60 King</td></tr>"
+        "<tr><td>06/02/2026</td><td>60 King</td></tr></table>"
     ),
     "{{selected_map_svg}}": (
         '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 120">'
@@ -93,8 +95,9 @@ def deterministic_template_checks(html: str, css: str = "", js_script: str = "")
         issues.append(
             "Accept CTA region missing: include {{cta_accept_button}} or a .proposal-cta element."
         )
-    if "display:none" in lower.replace(" ", "") and "cta" in lower:
-        issues.append("CTA may be hidden via display:none; ensure the accept button is visible.")
+    cta_hidden = cta_hidden_by_css_issue(css or "", html or "")
+    if cta_hidden:
+        issues.append(cta_hidden)
 
     missing_in_html = [p for p in REQUIRED_PLACEHOLDERS if p not in (html or "")]
     if missing_in_html and not issues:

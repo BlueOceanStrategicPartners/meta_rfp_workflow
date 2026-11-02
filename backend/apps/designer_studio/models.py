@@ -46,6 +46,29 @@ class ProposalTemplate(models.Model):
         return self.name
 
 
+class DesignerAgentRule(models.Model):
+    """Plain-text rules for the design agent; embedding_json enables hybrid RAG (SQLite / Azure sync)."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    designer = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="designer_agent_rules",
+    )
+    sort_order = models.PositiveIntegerField(default=0)
+    body = models.TextField()
+    embedding_json = models.JSONField(default=list, blank=True)
+    search_tokens_json = models.JSONField(default=list, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["sort_order", "created_at"]
+
+    def __str__(self) -> str:
+        return (self.body or "")[:80]
+
+
 class MediaAssetType(models.TextChoices):
     IMAGE = "IMAGE", "Image"
     VIDEO = "VIDEO", "Video"

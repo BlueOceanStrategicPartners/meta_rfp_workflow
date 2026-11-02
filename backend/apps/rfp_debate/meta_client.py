@@ -2,13 +2,149 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
+import time
 from typing import Any
 
 import httpx
 from django.conf import settings
 
+from .muse_completion import (
+    MuseStructuredValidationError,
+    infer_fixture_kind_from_prompt,
+    validate_muse_structured_payload,
+)
+from .muse_structured_schemas import structured_response_format_for_fixture
 from .schemas import CritiqueResult, DiscrepancyFlag, RFPExtractionPayload, SourceCitation
+
+logger = logging.getLogger(__name__)
+
+
+def _muse_debug_enabled() -> bool:
+    return bool(getattr(settings, "META_MODEL_DEBUG", False))
+
+
+def _muse_debug_max_chars() -> int:
+    return int(getattr(settings, "META_MODEL_DEBUG_MAX_CHARS", 4000))
+
+
+def _truncate_debug_text(text: str, *, max_chars: int | None = None) -> str:
+    limit = max_chars if max_chars is not None else _muse_debug_max_chars()
+    raw = text or ""
+    if len(raw) <= limit:
+        return raw
+    return f"{raw[:limit]}\n…[+{len(raw) - limit} chars truncated]"
+
+
+def _summarize_messages_for_log(messages: Any) -> list[dict[str, Any]]:
+    if not isinstance(messages, list):
+        return []
+    preview_each = min(800, max(200, _muse_debug_max_chars() // max(len(messages), 1)))
+    out: list[dict[str, Any]] = []
+    for msg in messages[:24]:
+        if not isinstance(msg, dict):
+            continue
+        content = str(msg.get("content") or "")
+        out.append(
+            {
+                "role": msg.get("role"),
+                "chars": len(content),
+                "preview": _truncate_debug_text(content, max_chars=preview_each),
+            }
+        )
+    if len(messages) > 24:
+        out.append({"role": "…", "chars": 0, "preview": f"+{len(messages) - 24} more messages omitted"})
+    return out
+
+
+def _log_muse_request(
+    *,
+    fixture_kind: str | None,
+    model_id: str,
+    payload: dict[str, Any],
+) -> float:
+    if not _muse_debug_enabled():
+        return time.monotonic()
+    messages = payload.get("messages")
+    summary = _summarize_messages_for_log(messages)
+    logger.info(
+        "MUSE → request model=%s fixture_kind=%s message_count=%s response_format=%s\n%s",
+        model_id,
+        fixture_kind,
+        len(messages) if isinstance(messages, list) else 0,
+        payload.get("response_format"),
+        json.dumps(summary, indent=2, ensure_ascii=False)[: _muse_debug_max_chars()],
+    )
+    return time.monotonic()
+
+
+def _log_muse_response(
+    *,
+    started: float,
+    fixture_kind: str | None,
+    model_id: str,
+    raw_content: str,
+    parsed: dict[str, Any] | None,
+    error: str | None = None,
+) -> None:
+    if not _muse_debug_enabled():
+        return
+    elapsed_ms = int((time.monotonic() - started) * 1000)
+    if error:
+        logger.info(
+            "MUSE ← error model=%s fixture_kind=%s elapsed_ms=%s error=%s",
+            model_id,
+            fixture_kind,
+            elapsed_ms,
+            _truncate_debug_text(error, max_chars=1200),
+        )
+        return
+    parsed_keys = sorted(parsed.keys()) if isinstance(parsed, dict) else []
+    logger.info(
+        "MUSE ← response model=%s fixture_kind=%s elapsed_ms=%s parsed_keys=%s\nraw_content:\n%s\nparsed_preview:\n%s",
+        model_id,
+        fixture_kind,
+        elapsed_ms,
+        parsed_keys,
+        _truncate_debug_text(raw_content),
+        _truncate_debug_text(json.dumps(parsed, ensure_ascii=False) if parsed else "{}", max_chars=2000),
+    )
+
+
+class MetaModelAPIError(RuntimeError):
+    """Raised when the Meta/Muse chat API fails and fixture fallback is disabled."""
+
+    def __init__(self, message: str, *, cause: Exception | None = None):
+        super().__init__(message)
+        self.cause = cause
+
+
+def parse_model_json_content(content: str) -> dict[str, Any]:
+    """
+    Parse JSON from model message.content.
+    Prefer Meta structured output (json_schema) — content is pure JSON; keep prose fallback
+    for legacy json_object responses.
+    """
+    text = (content or "").strip()
+    if not text:
+        raise ValueError("empty model content")
+    decoder = json.JSONDecoder()
+    try:
+        obj, _end = decoder.raw_decode(text)
+        if isinstance(obj, dict):
+            return obj
+    except json.JSONDecodeError:
+        pass
+    idx = text.find("{")
+    while idx >= 0:
+        try:
+            obj, _end = decoder.raw_decode(text, idx)
+            if isinstance(obj, dict):
+                return obj
+        except json.JSONDecodeError:
+            idx = text.find("{", idx + 1)
+    raise ValueError("no JSON object in model content")
 
 
 class MetaModelClient:
@@ -24,22 +160,37 @@ class MetaModelClient:
         user_content: str,
         reasoning_effort: str | None = None,
         fixture_kind: str | None = None,
+        allow_fixture_fallback: bool = True,
     ) -> dict[str, Any]:
         if settings.USE_FIXTURE_DEBATE or not self.api_key:
             return self._fixture_response(
                 model_id, user_content, system_prompt=system_prompt, fixture_kind=fixture_kind
             )
+        effective_kind = infer_fixture_kind_from_prompt(
+            fixture_kind=fixture_kind,
+            system_prompt=system_prompt,
+            user_content=user_content,
+        )
+        structured = structured_response_format_for_fixture(effective_kind)
         payload: dict[str, Any] = {
             "model": model_id,
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_content},
             ],
-            "response_format": {"type": "json_object"},
+            "response_format": structured
+            or {"type": "json_object"},
         }
         if reasoning_effort:
             payload["reasoning_effort"] = reasoning_effort
-        return self._post_chat_completion(payload, model_id, user_content, system_prompt, fixture_kind)
+        return self._post_chat_completion(
+            payload,
+            model_id,
+            user_content,
+            system_prompt,
+            effective_kind,
+            allow_fixture_fallback=allow_fixture_fallback,
+        )
 
     def complete_json_messages(
         self,
@@ -48,6 +199,7 @@ class MetaModelClient:
         messages: list[dict[str, str]],
         reasoning_effort: str | None = None,
         fixture_kind: str | None = None,
+        allow_fixture_fallback: bool = True,
     ) -> dict[str, Any]:
         system_prompt = next(
             (m.get("content", "") for m in messages if m.get("role") == "system"),
@@ -61,14 +213,28 @@ class MetaModelClient:
                 system_prompt=system_prompt,
                 fixture_kind=fixture_kind,
             )
+        effective_kind = infer_fixture_kind_from_prompt(
+            fixture_kind=fixture_kind,
+            system_prompt=system_prompt,
+            user_content=user_content,
+        )
+        structured = structured_response_format_for_fixture(effective_kind)
         payload: dict[str, Any] = {
             "model": model_id,
             "messages": messages,
-            "response_format": {"type": "json_object"},
+            "response_format": structured
+            or {"type": "json_object"},
         }
         if reasoning_effort:
             payload["reasoning_effort"] = reasoning_effort
-        return self._post_chat_completion(payload, model_id, user_content, system_prompt, fixture_kind)
+        return self._post_chat_completion(
+            payload,
+            model_id,
+            user_content,
+            system_prompt,
+            effective_kind,
+            allow_fixture_fallback=allow_fixture_fallback,
+        )
 
     def _post_chat_completion(
         self,
@@ -77,18 +243,84 @@ class MetaModelClient:
         user_content: str,
         system_prompt: str,
         fixture_kind: str | None,
+        *,
+        allow_fixture_fallback: bool = True,
     ) -> dict[str, Any]:
         headers = {"Authorization": f"Bearer {self.api_key}"}
+        http_timeout = float(getattr(settings, "META_MODEL_HTTP_TIMEOUT", 300.0))
+        started = _log_muse_request(fixture_kind=fixture_kind, model_id=model_id, payload=payload)
         try:
-            with httpx.Client(timeout=120.0) as client:
+            with httpx.Client(timeout=http_timeout) as client:
                 response = client.post(
                     f"{self.base_url}/chat/completions", json=payload, headers=headers
                 )
+                if response.status_code >= 400:
+                    logger.error(
+                        "Meta model HTTP %s (model=%s, fixture_kind=%s): %s",
+                        response.status_code,
+                        model_id,
+                        fixture_kind,
+                        (response.text or "")[:800],
+                    )
                 response.raise_for_status()
                 data = response.json()
                 content = data["choices"][0]["message"]["content"]
-                return json.loads(content)
-        except (httpx.HTTPError, json.JSONDecodeError, KeyError, TypeError, ValueError):
+                raw_content = content if isinstance(content, str) else str(content)
+                parsed = parse_model_json_content(raw_content)
+                validated = validate_muse_structured_payload(parsed, fixture_kind=fixture_kind)
+                _log_muse_response(
+                    started=started,
+                    fixture_kind=fixture_kind,
+                    model_id=model_id,
+                    raw_content=raw_content,
+                    parsed=validated,
+                )
+                return validated
+        except MuseStructuredValidationError as exc:
+            _log_muse_response(
+                started=started,
+                fixture_kind=fixture_kind,
+                model_id=model_id,
+                raw_content="",
+                parsed=None,
+                error=f"structured validation ({exc.code}): {exc}",
+            )
+            logger.warning(
+                "Meta structured validation failed (model=%s, fixture_kind=%s, code=%s): %s",
+                model_id,
+                fixture_kind,
+                exc.code,
+                exc,
+            )
+            if not allow_fixture_fallback:
+                raise MetaModelAPIError(
+                    f"Design model returned invalid structured output ({exc.code}): {exc}",
+                    cause=exc,
+                ) from exc
+            return self._fixture_response(
+                model_id, user_content, system_prompt=system_prompt, fixture_kind=fixture_kind
+            )
+        except (httpx.HTTPError, json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+            _log_muse_response(
+                started=started,
+                fixture_kind=fixture_kind,
+                model_id=model_id,
+                raw_content="",
+                parsed=None,
+                error=str(exc),
+            )
+            logger.warning(
+                "Meta model API failed (model=%s, fixture_kind=%s, fallback=%s): %s",
+                model_id,
+                fixture_kind,
+                allow_fixture_fallback,
+                exc,
+            )
+            if not allow_fixture_fallback:
+                raise MetaModelAPIError(
+                    f"Design model API call failed: {exc}. Check META_MODEL_API_KEY and network.",
+                    cause=exc,
+                ) from exc
             return self._fixture_response(
                 model_id, user_content, system_prompt=system_prompt, fixture_kind=fixture_kind
             )
@@ -273,6 +505,37 @@ class MetaModelClient:
         system_prompt: str = "",
         fixture_kind: str | None = None,
     ) -> dict[str, Any]:
+        if fixture_kind == "rfp_extraction" or "rfpextractionpayload" in system_prompt.lower():
+            return self._sample_extraction(
+                mismatch="MISMATCH_FIXTURE" in user_content and "resolved" not in user_content.lower()
+            )
+        if fixture_kind == "rfp_critique" or (
+            "critic" in user_content.lower() and "cross-examine" in user_content.lower()
+        ):
+            if (
+                "MISMATCH_FIXTURE" in user_content
+                and "resolved" not in user_content.lower()
+            ):
+                return {
+                    "discrepancy_flags": [
+                        {
+                            "field_path": "total_room_nights",
+                            "severity": "high",
+                            "message": "Daily blocks do not sum to total",
+                            "expected": "180",
+                            "actual": "150",
+                        }
+                    ],
+                    "consensus_score": 0.5,
+                }
+            return {"discrepancy_flags": [], "consensus_score": 1.0}
+        if fixture_kind == "voice_reply" or (
+            "User:" in user_content and "RFP session" in user_content
+        ):
+            user_msg = user_content.split("User:", 1)[-1].strip()
+            return {
+                "reply": f"Got it. {user_msg[:100]}. You can edit the cards or open the venue map.",
+            }
         if fixture_kind == "designer_asset_meta" or "media for a hospitality proposal" in system_prompt:
             return {
                 "description": "Premium hospitality visual suitable for hero or gallery placement.",
@@ -280,10 +543,26 @@ class MetaModelClient:
                 "dominant_mood": "luxury",
                 "embed_hint": "Use full-width responsive img or muted autoplay video with controls.",
             }
+        if fixture_kind == "designer_execution_plan" or "plan how a hospitality proposal template editor" in system_prompt:
+            return {
+                "steps": [
+                    {"id": "exec_1", "label": "Inspect template structure and locate edit targets"},
+                    {"id": "exec_2", "label": "Apply HTML, CSS, and JS updates for the brief"},
+                ],
+                "summary": "Fixture execution plan.",
+            }
+        if fixture_kind == "designer_work_plan" or (
+            "progress labels for a hospitality proposal design agent" in system_prompt
+        ):
+            return {"labels": {}}
+        if fixture_kind == "designer_tool_loop_repair" or "Template Repair Editor" in system_prompt:
+            return {"kind": "tool", "tool": "validate_template", "arguments": {}}
+        if fixture_kind == "designer_tool_loop" or "Proposal Template Editor" in system_prompt:
+            return {"kind": "tool", "tool": "get_template_overview", "arguments": {}}
         if fixture_kind == "designer_chat" or "Proposal Template Architect" in system_prompt:
             instruction = user_content.split("Designer request:")[-1] if "Designer request:" in user_content else user_content
             return self._designer_fixture_html(instruction)
-        if fixture_kind == "designer_validate" or "validate compiled hospitality" in system_prompt.lower():
+        if fixture_kind == "designer_validate" or fixture_kind == "designer_save_validate" or "validate compiled hospitality" in system_prompt.lower() or "before save" in system_prompt.lower():
             return {"valid": True, "issues": [], "summary": "Fixture validation passed."}
         if fixture_kind == "map_chat" or "Interactive Venue Map Architect" in system_prompt:
             instruction = (
@@ -294,11 +573,8 @@ class MetaModelClient:
             return self._map_fixture_interactive(instruction)
         if fixture_kind == "map_validate" or "validate compiled interactive hospitality venue" in system_prompt.lower():
             return {"valid": True, "issues": [], "summary": "Fixture map validation passed."}
-        if "User:" in user_content and "RFP session" in user_content:
-            user_msg = user_content.split("User:", 1)[-1].strip()
-            return {
-                "reply": f"Got it. {user_msg[:100]}. You can edit the cards or open the venue map.",
-            }
+        if "re-extract" in user_content.lower() or "iteration" in user_content.lower():
+            return self._sample_extraction(mismatch=False)
         if "critic" in user_content.lower() or "cross-examine" in user_content.lower():
             if (
                 "MISMATCH_FIXTURE" in user_content
@@ -317,8 +593,11 @@ class MetaModelClient:
                     "consensus_score": 0.5,
                 }
             return {"discrepancy_flags": [], "consensus_score": 1.0}
-        if "re-extract" in user_content.lower() or "iteration" in user_content.lower():
-            return self._sample_extraction(mismatch=False)
+        if "User:" in user_content and "RFP session" in user_content:
+            user_msg = user_content.split("User:", 1)[-1].strip()
+            return {
+                "reply": f"Got it. {user_msg[:100]}. You can edit the cards or open the venue map.",
+            }
         return self._sample_extraction(
             mismatch="MISMATCH_FIXTURE" in user_content and "resolved" not in user_content.lower()
         )

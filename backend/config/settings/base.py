@@ -4,6 +4,7 @@ from datetime import timedelta
 from pathlib import Path
 
 from dotenv import load_dotenv
+from corsheaders.defaults import default_headers
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
@@ -104,6 +105,10 @@ CORS_ALLOWED_ORIGINS = os.getenv(
     "http://localhost:5173,http://127.0.0.1:5173",
 ).split(",")
 CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOW_HEADERS = (
+    *default_headers,
+    "cache-control",
+)
 
 CSRF_TRUSTED_ORIGINS = os.getenv(
     "CSRF_TRUSTED_ORIGINS",
@@ -126,6 +131,76 @@ CHANNEL_LAYERS = {
 META_MODEL_API_KEY = os.getenv("META_MODEL_API_KEY") or os.getenv("LLM_API_KEY", "")
 META_MODEL_API_BASE = os.getenv("META_MODEL_API_BASE", "https://api.meta.ai/v1")
 META_MODEL_SPARK = os.getenv("META_MODEL_SPARK", "muse-spark-1.3")
+# Muse scaffold/repair JSON can exceed 120s; designer tool loop needs a longer read timeout.
+META_MODEL_HTTP_TIMEOUT = float(os.getenv("META_MODEL_HTTP_TIMEOUT", "300"))
+# Log truncated Muse request/response bodies to the console (local debugging).
+META_MODEL_DEBUG = os.getenv("META_MODEL_DEBUG", "false").lower() in ("1", "true", "yes")
+META_MODEL_DEBUG_MAX_CHARS = int(os.getenv("META_MODEL_DEBUG_MAX_CHARS", "4000"))
+# Automatic layout/validation repair passes after each design-agent turn (no user prompts).
+DESIGNER_SELF_CHECK_MAX_PASSES = int(os.getenv("DESIGNER_SELF_CHECK_MAX_PASSES", "4"))
+DESIGNER_MAX_HISTORY_TURNS = int(os.getenv("DESIGNER_MAX_HISTORY_TURNS", "12"))
+DESIGNER_MAX_TURN_CHARS = int(os.getenv("DESIGNER_MAX_TURN_CHARS", "2000"))
+DESIGNER_MAX_AUTOMATION_CHARS = int(os.getenv("DESIGNER_MAX_AUTOMATION_CHARS", "2800"))
+DESIGNER_PREVIEW_AUTOMATION_MAX_DEPTH = int(os.getenv("DESIGNER_PREVIEW_AUTOMATION_MAX_DEPTH", "1"))
+# tool_loop = scoped template tools + iterate until finish; full_document = legacy whole-file JSON regen
+DESIGNER_AGENT_MODE = os.getenv("DESIGNER_AGENT_MODE", "tool_loop").strip().lower()
+DESIGNER_WORK_PLAN_LLM_LABELS = os.getenv("DESIGNER_WORK_PLAN_LLM_LABELS", "false").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+# LangGraph checkpoints: sqlite (file under BASE_DIR) or memory (tests)
+DESIGNER_LANGGRAPH_CHECKPOINT_BACKEND = os.getenv(
+    "DESIGNER_LANGGRAPH_CHECKPOINT_BACKEND", "sqlite"
+).strip().lower()
+DESIGNER_TOOL_LOOP_MAX_TURNS = int(
+    os.getenv("DESIGNER_TOOL_LOOP_MAX_TURNS", os.getenv("DESIGNER_TOOL_LOOP_MAX_STEPS", "1000"))
+)
+# Deprecated alias — counts model turns, not individual tool calls
+DESIGNER_TOOL_LOOP_MAX_STEPS = DESIGNER_TOOL_LOOP_MAX_TURNS
+DESIGNER_TOOL_LOOP_REPAIR_MAX_TURNS = int(
+    os.getenv(
+        "DESIGNER_TOOL_LOOP_REPAIR_MAX_TURNS",
+        os.getenv("DESIGNER_TOOL_LOOP_REPAIR_MAX_STEPS", "1000"),
+    )
+)
+DESIGNER_TOOL_LOOP_REPAIR_MAX_STEPS = DESIGNER_TOOL_LOOP_REPAIR_MAX_TURNS
+DESIGNER_TOOL_LOOP_CONTINUATION_BONUS_TURNS = int(
+    os.getenv("DESIGNER_TOOL_LOOP_CONTINUATION_BONUS_TURNS", os.getenv("DESIGNER_TOOL_LOOP_CONTINUATION_BONUS_STEPS", "8"))
+)
+DESIGNER_TOOL_LOOP_CONTINUATION_BONUS_STEPS = DESIGNER_TOOL_LOOP_CONTINUATION_BONUS_TURNS
+DESIGNER_TOOL_LOOP_MAX_TOOLS_PER_TURN = int(os.getenv("DESIGNER_TOOL_LOOP_MAX_TOOLS_PER_TURN", "48"))
+DESIGNER_TOOL_LOOP_STUCK_REPEAT_THRESHOLD = int(os.getenv("DESIGNER_TOOL_LOOP_STUCK_REPEAT_THRESHOLD", "3"))
+DESIGNER_TOOL_LOOP_CONDENSE_AFTER_PAIRS = int(os.getenv("DESIGNER_TOOL_LOOP_CONDENSE_AFTER_PAIRS", "8"))
+DESIGNER_TOOL_LOOP_KEEP_RECENT_PAIRS = int(os.getenv("DESIGNER_TOOL_LOOP_KEEP_RECENT_PAIRS", "4"))
+DESIGNER_TOOL_LOOP_TOOL_RESULT_CHARS = int(os.getenv("DESIGNER_TOOL_LOOP_TOOL_RESULT_CHARS", "4000"))
+DESIGNER_TOOL_LOOP_MAX_ISSUES_IN_PAYLOAD = int(os.getenv("DESIGNER_TOOL_LOOP_MAX_ISSUES_IN_PAYLOAD", "12"))
+DESIGNER_TOOL_LOOP_MAX_HITS_IN_PAYLOAD = int(os.getenv("DESIGNER_TOOL_LOOP_MAX_HITS_IN_PAYLOAD", "10"))
+DESIGNER_TOOL_LOOP_MAX_READ_CONTENT_CHARS = int(os.getenv("DESIGNER_TOOL_LOOP_MAX_READ_CONTENT_CHARS", "2800"))
+DESIGNER_TOOL_LOOP_MESSAGE_BUDGET_CHARS = int(os.getenv("DESIGNER_TOOL_LOOP_MESSAGE_BUDGET_CHARS", "48000"))
+DESIGNER_TOOL_LOOP_AUTO_FINISH = os.getenv("DESIGNER_TOOL_LOOP_AUTO_FINISH", "1").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+)
+DESIGNER_TOOL_LOOP_HISTORY_TURN_CHARS = int(os.getenv("DESIGNER_TOOL_LOOP_HISTORY_TURN_CHARS", "900"))
+# Post-executor: deterministic checks only; no Muse repair to-do loop (legacy: set both to false/0).
+DESIGNER_VALIDATOR_DETERMINISTIC_ONLY = os.getenv(
+    "DESIGNER_VALIDATOR_DETERMINISTIC_ONLY", "1"
+).strip().lower() in ("1", "true", "yes")
+DESIGNER_VALIDATOR_REPAIR_ENABLED = os.getenv("DESIGNER_VALIDATOR_REPAIR_ENABLED", "0").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+)
+DESIGNER_EXEC_PLAN_MAX_SIMPLE_STEPS = int(os.getenv("DESIGNER_EXEC_PLAN_MAX_SIMPLE_STEPS", "3"))
+DESIGNER_EXEC_PLAN_MAX_STANDARD_STEPS = int(os.getenv("DESIGNER_EXEC_PLAN_MAX_STANDARD_STEPS", "5"))
+DESIGNER_READONLY_BATCHES_BEFORE_EDIT_STEER = int(
+    os.getenv("DESIGNER_READONLY_BATCHES_BEFORE_EDIT_STEER", "2")
+)
+DESIGNER_ALLOW_LEGACY_FULL_DOCUMENT = (
+    os.getenv("DESIGNER_ALLOW_LEGACY_FULL_DOCUMENT", "false").lower() == "true"
+)
 META_MODEL_WONDER = os.getenv("META_MODEL_WONDER", "muse-wonder")
 USE_FIXTURE_DEBATE = os.getenv("USE_FIXTURE_DEBATE", "false").lower() == "true"
 

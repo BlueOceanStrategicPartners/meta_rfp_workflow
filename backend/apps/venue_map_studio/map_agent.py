@@ -14,7 +14,7 @@ from apps.venue_map_studio.map_services import (
 )
 
 MAP_SYSTEM_PROMPT = (
-    "You are the Interactive Venue Map Architect for a hospitality RFP platform. "
+    "You are the Interactive Venue Map Architect (invoked from Designer Studio — same product flow). "
     "The user provides a floorplan image and/or text description — you build the entire map; "
     "they never draw polygons manually. "
     "Return JSON only with keys: assistant_message (string), html_markup (string), "
@@ -24,9 +24,14 @@ MAP_SYSTEM_PROMPT = (
     "image_urls (array of absolute URLs from attachments when provided). "
     "html_markup must define clickable regions using data-location-id matching each location id. "
     "js_script must: on location click, show an in-map popup with label, description, and images; "
+    "popups must start hidden (class hidden) and only open on zone click; include a close control that hides the popup; "
+    "never use a full-viewport fixed overlay on initial load. "
     "and call window.parent.postMessage({type:'venue-map-select', locationId, label, description, imageUrls}, '*'). "
     "Use semantic HTML, responsive CSS, no inline onclick handlers. "
-    "If a floorplan image URL is attached, use it as a background or reference layer in the layout."
+    "If a floorplan image URL is attached, use it as a background or reference layer in the layout. "
+    "If the user skipped follow-up questions or no image was attached, invent a professional generic "
+    "hospitality floorplate with 4–8 labeled zones — do not ask more questions unless a critical "
+    "detail is impossible to infer."
 )
 
 MAP_VALIDATION_PROMPT = (
@@ -84,7 +89,11 @@ class MapStudioAgent:
             [str(o) for o in options if o][:6] if isinstance(options, list) else []
         )
         if not clarification_options and "?" in assistant:
-            clarification_options = ["Use ballroom labels", "Add photo gallery per zone", "Simplify layout"]
+            clarification_options = [
+                "Use ballroom labels",
+                "Add photo gallery per zone",
+                "Skip questions — just create it",
+            ]
         return {
             "assistant_message": assistant,
             "html_markup": html,
