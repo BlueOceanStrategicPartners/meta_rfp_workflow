@@ -118,33 +118,6 @@ DESIGNER_ASSET_META: dict[str, Any] = {
     "required": ["description"],
 }
 
-MAP_INTERACTIVE_RESPONSE: dict[str, Any] = {
-    "type": "object",
-    "properties": {
-        "assistant_message": {"type": "string"},
-        "html_markup": {"type": "string"},
-        "css_stylesheet": {"type": "string"},
-        "js_script": {"type": "string"},
-        "locations": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "id": {"type": "string"},
-                    "label": {"type": "string"},
-                    "description": {"type": "string"},
-                    "image_urls": {"type": "array", "items": {"type": "string"}},
-                },
-                "required": ["id", "label"],
-            },
-        },
-        "clarification_options": {"type": "array", "items": {"type": "string"}},
-    },
-    "required": ["assistant_message", "html_markup", "css_stylesheet", "js_script", "locations"],
-}
-
-MAP_VALIDATION_RESULT: dict[str, Any] = DESIGNER_VALIDATION_RESULT
-
 VOICE_REPLY: dict[str, Any] = {
     "type": "object",
     "properties": {
@@ -192,8 +165,6 @@ FIXTURE_STRUCTURED_SCHEMAS: dict[str, tuple[str, dict[str, Any]]] = {
     "designer_save_validate": ("DesignerValidationResult", DESIGNER_VALIDATION_RESULT),
     "designer_rule_validate": ("DesignerRuleConflict", DESIGNER_RULE_CONFLICT),
     "designer_asset_meta": ("DesignerAssetMeta", DESIGNER_ASSET_META),
-    "map_chat": ("MapInteractiveResponse", MAP_INTERACTIVE_RESPONSE),
-    "map_validate": ("MapValidationResult", MAP_VALIDATION_RESULT),
     "voice_reply": ("VoiceAssistantReply", VOICE_REPLY),
     "rfp_extraction": ("RfpExtractionPayload", RFP_EXTRACTION_PAYLOAD),
     "rfp_critique": ("RfpCritiqueResult", RFP_CRITIQUE_RESULT),

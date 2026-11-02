@@ -18,6 +18,9 @@ READ_ONLY_TOOLS = frozenset(
         "read_template_lines",
         "search_template",
         "validate_template",
+        "lint_template",
+        "get_map_knowledge",
+        "get_map_reference_code",
     }
 )
 MUTATING_TOOLS = frozenset({"replace_exact", "replace_lines", "append_template"})
@@ -53,10 +56,20 @@ def _summarize_result(tool: str, result: dict[str, Any]) -> str:
             return f"updated lines {result.get('start_line')}-{result.get('end_line')}"
         return "file updated"
     if tool == "search_template":
+        mode = str(result.get("mode") or "hybrid")
         n = len(result.get("hits") or [])
+        if mode == "hybrid" and n:
+            top = (result.get("hits") or [{}])[0]
+            name = str(top.get("name") or "match")
+            return f"{n} structure match(es) — top: {name[:48]}"
         return f"{n} hit(s) on {result.get('file')}/{result.get('query')!r}"
     if tool == "read_template_lines":
         return f"read {result.get('file')} lines {result.get('start_line')}-{result.get('end_line')}"
+    if tool == "lint_template":
+        if result.get("valid"):
+            return "lint passed"
+        n = len(result.get("diagnostics") or result.get("issues") or [])
+        return f"{n} lint issue(s)"
     if tool == "validate_template":
         if result.get("valid"):
             return "valid"
@@ -72,6 +85,10 @@ def _summarize_result(tool: str, result: dict[str, Any]) -> str:
     if tool == "read_template_symbol":
         sym = result.get("symbol") or {}
         return f"symbol {sym.get('name')} lines {sym.get('start_line')}-{sym.get('end_line')}"
+    if tool == "get_map_knowledge":
+        return f"topic {result.get('topic') or 'overview'}"
+    if tool == "get_map_reference_code":
+        return f"part {result.get('part') or 'structure'}"
     return "ok"
 
 

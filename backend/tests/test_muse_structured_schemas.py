@@ -22,8 +22,6 @@ class MuseStructuredSchemasTests(SimpleTestCase):
             "designer_execution_plan",
             "designer_chat",
             "designer_validate",
-            "map_chat",
-            "map_validate",
             "rfp_extraction",
             "rfp_critique",
             "voice_reply",

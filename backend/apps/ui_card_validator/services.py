@@ -4,9 +4,11 @@ from decimal import Decimal
 
 from apps.core.exceptions import CardMutationValidationError
 from apps.dynamic_pricing.services import compute_dynamic_quote
-from apps.inventory.models import SpaceInventory, VenueMapZone
+from apps.inventory.models import SpaceInventory
 from apps.rfp_debate.models import RFPSubmission, RFPStatus
 from apps.rfp_debate.tasks import broadcast_rfp
+
+from .inventory_suggest import _suggest_alternative_spaces
 
 
 def validate_card_mutation(session_id: str, payload: dict) -> dict:
@@ -17,30 +19,30 @@ def validate_card_mutation(session_id: str, payload: dict) -> dict:
 
     meeting = payload.get("meeting_space") or rfp.active_ui_cards_json.get("meeting_space", {})
     headcount = meeting.get("headcount") or 0
-    zone_id = meeting.get("selected_zone_id")
     seating_style = (meeting.get("seating_style") or "classroom").lower()
+    zone_id = meeting.get("selected_zone_id") or meeting.get("selected_space_id")
 
     if zone_id:
         try:
-            zone = VenueMapZone.objects.select_related("space_inventory").get(pk=zone_id)
-        except VenueMapZone.DoesNotExist:
-            raise CardMutationValidationError("Selected map zone not found.")
-        space = zone.space_inventory
-        if space:
-            capacities = space.capacities_json or {}
-            cap = capacities.get(seating_style) or capacities.get("classroom") or 0
-            if headcount and cap and headcount > cap:
-                alternatives = _suggest_alternatives(headcount, seating_style, zone.venue_map_id)
-                broadcast_rfp(
-                    session_id,
-                    "map_highlight",
-                    {"zone_ids": [str(z.id) for z in alternatives], "reason": "capacity"},
-                )
-                exc = CardMutationValidationError(
-                    f"Headcount {headcount} exceeds {space.name} capacity {cap}."
-                )
-                exc.alternatives = [str(z.id) for z in alternatives]
-                raise exc
+            space = SpaceInventory.objects.get(pk=zone_id)
+        except SpaceInventory.DoesNotExist:
+            raise CardMutationValidationError("Selected meeting space not found.")
+        capacities = space.capacities_json or {}
+        cap = capacities.get(seating_style) or capacities.get("classroom") or 0
+        if headcount and cap and headcount > cap:
+            alternatives = _suggest_alternative_spaces(
+                headcount, seating_style, space.property_id
+            )
+            broadcast_rfp(
+                session_id,
+                "map_highlight",
+                {"zone_ids": [str(s.id) for s in alternatives], "reason": "capacity"},
+            )
+            exc = CardMutationValidationError(
+                f"Headcount {headcount} exceeds {space.name} capacity {cap}."
+            )
+            exc.alternatives = [str(s.id) for s in alternatives]
+            raise exc
 
     cards = dict(rfp.active_ui_cards_json or {})
     for key, val in payload.items():
@@ -96,19 +98,3 @@ def validate_card_mutation(session_id: str, payload: dict) -> dict:
         },
     }
 
-
-def _suggest_alternatives(headcount: int, seating_style: str, venue_map_id) -> list[VenueMapZone]:
-    zones = VenueMapZone.objects.filter(venue_map_id=venue_map_id).select_related(
-        "space_inventory"
-    )
-    result = []
-    for zone in zones:
-        space = zone.space_inventory
-        if not space:
-            continue
-        cap = (space.capacities_json or {}).get(seating_style) or (space.capacities_json or {}).get(
-            "classroom", 0
-        )
-        if cap >= headcount:
-            result.append(zone)
-    return result[:3]

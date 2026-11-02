@@ -12,6 +12,8 @@ from django.http import HttpRequest
 from apps.designer_studio.models import DesignerMediaAsset, MediaAssetType, ProposalTemplate
 from apps.rfp_debate.meta_client import MetaModelAPIError, MetaModelClient
 
+from .attachment_context import format_assets_for_agent as _format_assets_for_agent
+
 logger = logging.getLogger(__name__)
 
 ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
@@ -47,7 +49,6 @@ def save_designer_asset(
     upload: UploadedFile,
     request: HttpRequest,
     template: ProposalTemplate | None = None,
-    venue_map=None,
 ) -> DesignerMediaAsset:
     if upload.size > MAX_ASSET_BYTES:
         raise ValueError(f"File exceeds {MAX_ASSET_BYTES // (1024 * 1024)}MB limit.")
@@ -64,7 +65,6 @@ def save_designer_asset(
     asset = DesignerMediaAsset.objects.create(
         designer=designer,
         template=template,
-        venue_map=venue_map,
         file=upload,
         original_name=upload.name,
         content_type=content_type,
@@ -83,6 +83,8 @@ def asset_public_url(asset: DesignerMediaAsset, request: HttpRequest) -> str:
 
 
 def enrich_asset_metadata(asset: DesignerMediaAsset, request: HttpRequest) -> DesignerMediaAsset:
+    from .attachment_context import is_pasted_screenshot_name
+
     url = asset_public_url(asset, request)
     base_meta = {
         "id": str(asset.id),
@@ -94,6 +96,18 @@ def enrich_asset_metadata(asset: DesignerMediaAsset, request: HttpRequest) -> De
         "width": asset.width,
         "height": asset.height,
     }
+    if is_pasted_screenshot_name(asset.original_name):
+        asset.metadata_json = {
+            **base_meta,
+            "attachment_role": "layout_reference",
+            "description": "Designer preview screenshot — layout reference, not guest-facing media",
+            "suggested_placement": "reference_only",
+            "embed_hint": "Do not embed in proposal HTML; use only to locate the UI issue to fix.",
+            "upload_status": "ready",
+        }
+        asset.save(update_fields=["metadata_json"])
+        return asset
+
     prompt = (
         "You analyze media for a hospitality proposal template designer. "
         "Return JSON: description (string), suggested_placement (hero|gallery|sidebar|background), "
@@ -127,20 +141,12 @@ def enrich_asset_metadata(asset: DesignerMediaAsset, request: HttpRequest) -> De
     return asset
 
 
-def format_assets_for_agent(assets: list[DesignerMediaAsset]) -> str:
-    if not assets:
-        return ""
-    lines = ["Attached media assets (already stored — embed using absolute URLs):"]
-    for asset in assets:
-        meta = asset.metadata_json or {}
-        lines.append(
-            f"- {meta.get('original_name', asset.original_name)} [{asset.media_type}] "
-            f"url={meta.get('url')} "
-            f"description={meta.get('description', 'n/a')} "
-            f"placement={meta.get('suggested_placement', 'gallery')} "
-            f"embed_hint={meta.get('embed_hint', 'Use <img> or <video controls>')}"
-        )
-    return "\n".join(lines)
+def format_assets_for_agent(
+    assets: list[DesignerMediaAsset],
+    *,
+    message: str = "",
+) -> str:
+    return _format_assets_for_agent(assets, message=message)
 
 
 def assets_metadata_block(assets: list[DesignerMediaAsset]) -> list[dict[str, Any]]:

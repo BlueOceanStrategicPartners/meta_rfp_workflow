@@ -9,7 +9,6 @@ urlpatterns = [
     path("api/inventory/", include("apps.inventory.urls")),
     path("api/rfp/", include("apps.rfp_debate.urls")),
     path("api/cards/", include("apps.ui_card_validator.urls")),
-    path("api/maps/", include("apps.venue_map_studio.urls")),
     path("api/designer/", include("apps.designer_studio.urls")),
     path("api/pricing/", include("apps.dynamic_pricing.urls")),
     path("api/negotiation/", include("apps.negotiation_agent.urls")),

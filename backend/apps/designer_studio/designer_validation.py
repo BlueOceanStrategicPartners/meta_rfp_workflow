@@ -9,6 +9,7 @@ from apps.designer_studio.services import compile_template, deterministic_templa
 from apps.rfp_debate.meta_client import MetaModelClient
 
 from .template_alignment import collect_alignment_issues
+from .placeholder_guidance import validation_placeholder_guidance
 
 VALIDATION_SYSTEM_PROMPT = (
     "You validate compiled hospitality proposal HTML/CSS/JS templates against the user's brief. "
@@ -19,7 +20,8 @@ VALIDATION_SYSTEM_PROMPT = (
     "Template HTML uses {{binding_tokens}} in source — that is correct; do not flag tokens as "
     "'unresolved' or 'not verifiable' in the template source. "
     "CSS/HTML/JS in this prompt may be truncated for length — do not report prompt truncation "
-    "as a template defect."
+    "as a template defect.\n\n"
+    + validation_placeholder_guidance()
 )
 
 MUSE_SPURIOUS_ISSUE_PHRASES = (
@@ -216,6 +218,8 @@ def gather_chat_validation_issues(
 
 
 def should_skip_post_executor_validation(result: dict[str, Any]) -> bool:
+    if result.get("agent_cancelled"):
+        return True
     if result.get("model_api_error"):
         return True
     if result.get("tool_loop_exhausted") and not (result.get("tool_trace") or []):

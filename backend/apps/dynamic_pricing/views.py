@@ -66,32 +66,13 @@ class RenderProposalView(APIView):
         quote = DynamicPricingQuote.objects.filter(rfp=rfp).order_by("-created_at").first()
         cards = rfp.active_ui_cards_json or {}
         from apps.designer_studio.services import compile_template
-        from apps.designer_studio.venue_map_context import default_map_embed_for_proposal
-
-        map_embed = default_map_embed_for_proposal() or ""
-        replacements = {
-            "{{client_name}}": str(cards.get("event_overview", {}).get("company_name", "")),
-            "{{event_dates}}": f"{cards.get('event_overview', {}).get('check_in_date')} - {cards.get('event_overview', {}).get('check_out_date')}",
-            "{{verified_room_blocks}}": str(cards.get("room_block", {})),
-            "{{selected_map_svg}}": map_embed,
-            "{{meeting_space_specs}}": str(cards.get("meeting_space", {})),
-            "{{xgboost_quote_breakdown}}": str(
-                {
-                    "floor": str(quote.walk_away_floor_price) if quote else "",
-                    "target": str(quote.optimal_target_price) if quote else "",
-                    "anchor": str(quote.initial_anchor_price) if quote else "",
-                }
-            ),
-            "{{negotiated_concessions}}": "",
-            "{{cta_accept_button}}": '<button type="button">Accept Proposal</button>',
-        }
-        from apps.designer_studio.services import compile_template
-
         compiled = compile_template(
             template.html_markup,
             template.css_stylesheet,
             js_script=template.js_script,
-            replacements=replacements,
+            cards=cards,
+            quote=quote,
+            use_seed_if_empty=False,
         )
         rendered = RenderedProposal.objects.update_or_create(
             rfp=rfp,

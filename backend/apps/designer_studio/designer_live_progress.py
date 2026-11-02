@@ -7,6 +7,7 @@ from typing import Any
 
 _lock = threading.Lock()
 _by_user: dict[str, dict[str, Any]] = {}
+_cancel_requested: dict[str, bool] = {}
 
 
 def _user_key(user_id: Any) -> str:
@@ -16,6 +17,7 @@ def _user_key(user_id: Any) -> str:
 def begin_live_progress(*, user_id: Any) -> None:
     key = _user_key(user_id)
     with _lock:
+        _cancel_requested.pop(key, None)
         _by_user[key] = {
             "active": True,
             "updated_at": time.time(),
@@ -23,6 +25,45 @@ def begin_live_progress(*, user_id: Any) -> None:
             "work_plan": [],
             "tool_steps": [],
         }
+
+
+def request_designer_agent_cancel(*, user_id: Any) -> None:
+    """User cleared chat or closed the stream — stop tool loop / map stage for this designer."""
+    key = _user_key(user_id)
+    with _lock:
+        _cancel_requested[key] = True
+        cur = _by_user.get(key)
+        if cur:
+            cur["active"] = False
+            cur["updated_at"] = time.time()
+
+
+def clear_designer_agent_cancel(*, user_id: Any) -> None:
+    key = _user_key(user_id)
+    with _lock:
+        _cancel_requested.pop(key, None)
+
+
+def is_designer_agent_cancel_requested(*, user_id: Any) -> bool:
+    key = _user_key(user_id)
+    with _lock:
+        return bool(_cancel_requested.get(key))
+
+
+def build_agent_cancelled_result(
+    *,
+    html_markup: str = "",
+    css_stylesheet: str = "",
+    js_script: str = "",
+) -> dict[str, Any]:
+    return {
+        "assistant_message": "",
+        "html_markup": html_markup,
+        "css_stylesheet": css_stylesheet,
+        "js_script": js_script,
+        "agent_cancelled": True,
+        "self_check": {"valid": True, "issues": []},
+    }
 
 
 def patch_live_progress(

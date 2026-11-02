@@ -15,7 +15,6 @@ All JSON Muse calls use Chat Completions **structured output** (`response_format
 | Validate / save | `designer_validate`, `designer_save_validate` | `DesignerValidationResult` |
 | Agent rules | `designer_rule_validate` | `DesignerRuleConflict` |
 | Media upload | `designer_asset_meta` | `DesignerAssetMeta` |
-| Map studio | `map_chat`, `map_validate` | `MapInteractiveResponse`, `MapValidationResult` |
 | RFP debate | `rfp_extraction`, `rfp_critique` | `RfpExtractionPayload`, `RfpCritiqueResult` |
 | Voice assistant | `voice_reply` | `VoiceAssistantReply` |
 

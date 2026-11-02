@@ -12,6 +12,10 @@ from langgraph.graph import END, START, StateGraph
 from apps.rfp_debate.meta_client import MetaModelClient
 
 from .designer_executor_agent import DesignerExecutorAgent
+from .designer_live_progress import (
+    build_agent_cancelled_result,
+    is_designer_agent_cancel_requested,
+)
 from .designer_graph_checkmate import (
     DesignerGraphRoutingError,
     DesignerGraphTerminal,
@@ -33,11 +37,13 @@ from .designer_graph_state import (
     DesignerGraphState,
     build_graph_thread_id,
     initial_graph_state,
+    resolve_template_langgraph_thread_id,
 )
 from .designer_planner_agent import DesignerPlannerAgent
 from .designer_user_labels import GRAPH_PHASE_LABELS
 from .designer_validator_agent import DesignerValidatorAgent
 from .template_workspace import TemplateWorkspace
+from .tool_loop_context import build_executor_session_from_result
 
 logger = logging.getLogger(__name__)
 
@@ -190,6 +196,17 @@ def _validator_node(state: DesignerGraphState, config: RunnableConfig) -> dict[s
 
 
 def _validator_repair_node(state: DesignerGraphState, config: RunnableConfig) -> dict[str, Any]:
+    uid = state.get("user_id")
+    if uid is not None and is_designer_agent_cancel_requested(user_id=uid):
+        result = dict(state.get("result") or {})
+        result.update(
+            build_agent_cancelled_result(
+                html_markup=result.get("html_markup") or state.get("html_markup") or "",
+                css_stylesheet=result.get("css_stylesheet") or state.get("css_stylesheet") or "",
+                js_script=result.get("js_script") or state.get("js_script") or "",
+            )
+        )
+        return {"result": result, "graph_nodes": _append_graph_node(state, "validator_repair")}
     cb = _callbacks(config)
     issues = list(state.get("validation_issues") or [])
     result = dict(state.get("result") or {})
@@ -216,6 +233,9 @@ def _validator_repair_node(state: DesignerGraphState, config: RunnableConfig) ->
             on_tool_event=cb.get("on_tool_event"),
             on_todo_event=None,
             on_preview_event=cb.get("on_preview_event"),
+            user_id=state.get("user_id"),
+            graph_thread_id=state.get("graph_thread_id") or "",
+            executor_session_resumed=state.get("executor_session"),
         )
     except BaseException as exc:
         logger.exception("LangGraph validator repair failed: %s", exc)
@@ -223,10 +243,24 @@ def _validator_repair_node(state: DesignerGraphState, config: RunnableConfig) ->
 
     merged = _merge_repair_result(result, repaired)
     repair_passes = int(state.get("validation_repair_passes") or 0) + 1
+    ws = TemplateWorkspace(
+        html_markup=merged.get("html_markup") or state.get("html_markup") or "",
+        css_stylesheet=merged.get("css_stylesheet") or state.get("css_stylesheet") or "",
+        js_script=merged.get("js_script") or state.get("js_script") or "",
+    )
+    executor_session = build_executor_session_from_result(
+        merged,
+        ws,
+        graph_thread_id=state.get("graph_thread_id") or "",
+    )
     return {
         "result": merged,
         "validation_repair_passes": repair_passes,
         "graph_nodes": nodes,
+        "executor_session": executor_session,
+        "html_markup": ws.html_markup,
+        "css_stylesheet": ws.css_stylesheet,
+        "js_script": ws.js_script,
     }
 
 
@@ -239,6 +273,17 @@ def _route_after_validator(state: DesignerGraphState) -> str:
 
 
 def _planner_node(state: DesignerGraphState, config: RunnableConfig) -> dict[str, Any]:
+    uid = state.get("user_id")
+    if uid is not None and is_designer_agent_cancel_requested(user_id=uid):
+        return {
+            "terminal": DesignerGraphTerminal.EXECUTOR_FAILED.value,
+            "result": build_agent_cancelled_result(
+                html_markup=state.get("html_markup") or "",
+                css_stylesheet=state.get("css_stylesheet") or "",
+                js_script=state.get("js_script") or "",
+            ),
+            "graph_nodes": ["planner_agent"],
+        }
     cb = _callbacks(config)
     on_todo = cb.get("on_todo_event")
     on_tool = cb.get("on_tool_event")
@@ -270,6 +315,7 @@ def _planner_node(state: DesignerGraphState, config: RunnableConfig) -> dict[str
             workspace=workspace,
             context_prefix=state.get("context_prefix") or "",
             on_todo_event=on_todo,
+            history=state.get("history") or [],
         )
         plan_source = plan.source
         plan_summary = plan.summary
@@ -289,6 +335,18 @@ def _planner_node(state: DesignerGraphState, config: RunnableConfig) -> dict[str
 
 
 def _executor_node(state: DesignerGraphState, config: RunnableConfig) -> dict[str, Any]:
+    uid = state.get("user_id")
+    if uid is not None and is_designer_agent_cancel_requested(user_id=uid):
+        result = build_agent_cancelled_result(
+            html_markup=state.get("html_markup") or "",
+            css_stylesheet=state.get("css_stylesheet") or "",
+            js_script=state.get("js_script") or "",
+        )
+        return {
+            "result": result,
+            "terminal": resolve_executor_terminal(result).value,
+            "graph_nodes": ["executor_agent"],
+        }
     cb = _callbacks(config)
     client = cb.get("meta_client")
     executor = DesignerExecutorAgent(client=client)
@@ -316,6 +374,9 @@ def _executor_node(state: DesignerGraphState, config: RunnableConfig) -> dict[st
             on_tool_event=cb.get("on_tool_event"),
             on_todo_event=cb.get("on_todo_event"),
             on_preview_event=cb.get("on_preview_event"),
+            user_id=state.get("user_id"),
+            graph_thread_id=state.get("graph_thread_id") or "",
+            executor_session_resumed=state.get("executor_session"),
         )
     except BaseException as exc:
         logger.exception("LangGraph executor node failed: %s", exc)
@@ -344,10 +405,40 @@ def _executor_node(state: DesignerGraphState, config: RunnableConfig) -> dict[st
     result["graph_nodes"] = nodes
     result["graph_terminal"] = terminal.value
     result["checkpoint_thread_id"] = state.get("graph_thread_id") or ""
-    return {"result": result, "terminal": terminal.value, "graph_nodes": nodes}
+    ws = TemplateWorkspace(
+        html_markup=result.get("html_markup") or state.get("html_markup") or "",
+        css_stylesheet=result.get("css_stylesheet") or state.get("css_stylesheet") or "",
+        js_script=result.get("js_script") or state.get("js_script") or "",
+    )
+    executor_session = build_executor_session_from_result(
+        result,
+        ws,
+        graph_thread_id=state.get("graph_thread_id") or "",
+    )
+    return {
+        "result": result,
+        "terminal": terminal.value,
+        "graph_nodes": nodes,
+        "executor_session": executor_session,
+        "html_markup": ws.html_markup,
+        "css_stylesheet": ws.css_stylesheet,
+        "js_script": ws.js_script,
+    }
 
 
 def _continuation_node(state: DesignerGraphState, config: RunnableConfig) -> dict[str, Any]:
+    uid = state.get("user_id")
+    if uid is not None and is_designer_agent_cancel_requested(user_id=uid):
+        result = build_agent_cancelled_result(
+            html_markup=state.get("html_markup") or "",
+            css_stylesheet=state.get("css_stylesheet") or "",
+            js_script=state.get("js_script") or "",
+        )
+        return {
+            "result": result,
+            "terminal": DesignerGraphTerminal.CONTINUATION_DONE.value,
+            "graph_nodes": ["executor_agent"],
+        }
     cb = _callbacks(config)
     client = cb.get("meta_client")
     executor = DesignerExecutorAgent(client=client)
@@ -362,15 +453,32 @@ def _continuation_node(state: DesignerGraphState, config: RunnableConfig) -> dic
         on_tool_event=cb.get("on_tool_event"),
         on_todo_event=cb.get("on_todo_event"),
         on_preview_event=cb.get("on_preview_event"),
+        user_id=state.get("user_id"),
+        graph_thread_id=state.get("graph_thread_id") or "",
+        executor_session_resumed=state.get("executor_session"),
     )
     result["agent_mode"] = "langgraph_continuation"
     result["graph_nodes"] = ["executor_agent"]
     result["graph_terminal"] = DesignerGraphTerminal.CONTINUATION_DONE.value
     result["checkpoint_thread_id"] = state.get("graph_thread_id") or ""
+    ws = TemplateWorkspace(
+        html_markup=result.get("html_markup") or state.get("html_markup") or "",
+        css_stylesheet=result.get("css_stylesheet") or state.get("css_stylesheet") or "",
+        js_script=result.get("js_script") or state.get("js_script") or "",
+    )
+    executor_session = build_executor_session_from_result(
+        result,
+        ws,
+        graph_thread_id=state.get("graph_thread_id") or "",
+    )
     return {
         "result": result,
         "terminal": DesignerGraphTerminal.CONTINUATION_DONE.value,
         "graph_nodes": ["executor_agent"],
+        "executor_session": executor_session,
+        "html_markup": ws.html_markup,
+        "css_stylesheet": ws.css_stylesheet,
+        "js_script": ws.js_script,
     }
 
 
@@ -503,7 +611,19 @@ class DesignerAgentGraph:
         if not thread_id:
             if user_id is None:
                 user_id = "anon"
-            thread_id = build_graph_thread_id(user_id=user_id, template_id=template_id)
+            thread_id = resolve_template_langgraph_thread_id(
+                user_id=user_id,
+                template_id=template_id,
+            )
+
+        config = build_runnable_config(thread_id=thread_id)
+        resumed_session: dict[str, Any] | None = None
+        try:
+            prior = self.get_thread_state(thread_id)
+            if prior and isinstance(prior.get("executor_session"), dict):
+                resumed_session = prior["executor_session"]
+        except Exception:
+            resumed_session = None
 
         initial = initial_graph_state(
             message=message,
@@ -513,8 +633,10 @@ class DesignerAgentGraph:
             js_script=js_script,
             context_prefix=context_prefix,
             thread_id=thread_id,
+            user_id=user_id,
         )
-        config = build_runnable_config(thread_id=thread_id)
+        if resumed_session:
+            initial["executor_session"] = resumed_session
         token = push_stream_callbacks(
             {
                 "meta_client": self.client,

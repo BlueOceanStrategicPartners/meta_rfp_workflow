@@ -8,3 +8,4 @@ def test_normalize_adds_hidden_to_map_popup():
     h, c, j = normalize_map_interaction(html, css, js)
     assert "hidden" in h
     assert "closePopup" in j
+    assert "mapPopupAnchorBootstrap" in j or "positionPopupNearMarker" in j

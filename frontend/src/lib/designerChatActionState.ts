@@ -1,5 +1,6 @@
 import type { AgentProgressItem, AgentWorkPlanStep } from "./designerChatStream";
 import type { ChatMessage, DesignerChatActionState } from "./designerApi";
+import { collapseCompletedExecutionTodos } from "./designerAgentTodos";
 
 export type RestoredDesignerActionUi = {
   partialProgress: {
@@ -113,7 +114,22 @@ export function restoreDesignerActionUi(history: ChatMessage[]): RestoredDesigne
   }
 
   const clarifications = state.clarification_options ?? [];
-  const agentTodos = state.agent_todos ?? [];
+  let agentTodos = state.agent_todos ?? [];
+  if (!state.partial_completion) {
+    agentTodos = collapseCompletedExecutionTodos(agentTodos);
+    const execDone =
+      agentTodos.filter((t) => t.id.startsWith("exec_")).length === 0 ||
+      agentTodos
+        .filter((t) => t.id.startsWith("exec_"))
+        .every((t) => t.status === "done" || t.status === "skipped");
+    const finalizeStuck =
+      agentTodos.some((t) => t.id === "finalize" && t.status === "active") && execDone;
+    if (finalizeStuck) {
+      agentTodos = [];
+    } else {
+      agentTodos = agentTodos.filter((t) => t.status === "active" || t.status === "pending");
+    }
+  }
 
   if (state.partial_completion && state.continuation_recommended) {
     return {

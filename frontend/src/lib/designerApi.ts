@@ -76,6 +76,11 @@ export async function fetchDesignerLiveProgress(): Promise<DesignerLiveProgress>
   return res.json() as Promise<DesignerLiveProgress>;
 }
 
+/** Stop in-flight planner / executor / map agent work for this designer session. */
+export async function cancelDesignerAgentSession(): Promise<void> {
+  await apiFetch("/api/designer/chat/cancel/", { method: "POST" });
+}
+
 export type LoginSessionPayload = {
   email: string;
   role: string;
@@ -329,48 +334,6 @@ export async function previewTemplate(
   });
   if (!res.ok) throw new Error("Preview request failed");
   return res.json();
-}
-
-export type DefaultVenueMapDesignerPayload = {
-  available: boolean;
-  detail?: string;
-  id?: string;
-  title?: string;
-  locations?: { id: string; label: string; description?: string }[];
-  agent_context?: string;
-  map_section_snippet?: string;
-  map_slot_css?: string;
-};
-
-export async function fetchDesignerDefaultVenueMap(): Promise<DefaultVenueMapDesignerPayload> {
-  const res = await apiFetch("/api/designer/default-venue-map/");
-  if (!res.ok) throw new Error("Failed to load default venue map");
-  return res.json();
-}
-
-export async function injectDefaultVenueMapIntoTemplate(
-  html_markup: string,
-  css_stylesheet: string,
-): Promise<{
-  html_markup: string;
-  css_stylesheet: string;
-  default_map: DefaultVenueMapDesignerPayload;
-}> {
-  const res = await apiFetch("/api/designer/inject-default-venue-map/", {
-    method: "POST",
-    body: JSON.stringify({ html_markup, css_stylesheet }),
-  });
-  if (!res.ok) throw new Error("Could not insert default venue map slot");
-  return res.json();
-}
-
-export async function removeVenueMapSlotFromProposal(html_markup: string, css_stylesheet: string) {
-  const res = await apiFetch("/api/designer/remove-venue-map-slot/", {
-    method: "POST",
-    body: JSON.stringify({ html_markup, css_stylesheet }),
-  });
-  if (!res.ok) throw new Error("Could not remove map from proposal");
-  return res.json() as Promise<{ html_markup: string; css_stylesheet: string }>;
 }
 
 export function downloadJson(filename: string, data: unknown) {

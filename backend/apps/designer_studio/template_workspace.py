@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Literal
 
-from apps.designer_studio.models import REQUIRED_PLACEHOLDERS
+from apps.designer_studio.models import ALL_BINDING_PLACEHOLDERS, MANDATORY_PLACEHOLDERS
 
 TemplateFile = Literal["html", "css", "js"]
 
@@ -114,6 +114,6 @@ class TemplateWorkspace:
 
     def placeholder_report(self) -> dict[str, list[str]]:
         html = self.html_markup or ""
-        present = [p for p in REQUIRED_PLACEHOLDERS if p in html]
-        missing = [p for p in REQUIRED_PLACEHOLDERS if p not in html]
+        present = [p for p in ALL_BINDING_PLACEHOLDERS if p in html]
+        missing = [p for p in MANDATORY_PLACEHOLDERS if p not in html]
         return {"present": present, "missing": missing}

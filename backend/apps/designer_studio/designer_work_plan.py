@@ -7,7 +7,7 @@ from django.conf import settings
 
 from apps.rfp_debate.meta_client import MetaModelClient
 
-from .designer_map_orchestration import message_has_map_intent
+from .designer_map_intent import message_has_map_intent
 
 StepStatus = Literal["pending", "active", "done", "skipped"]
 
@@ -16,7 +16,6 @@ DEFAULT_LABELS: dict[str, str] = {
     "draft_proposal": "Update the proposal design and interactions",
     "validate_repair": "Run quality checks and apply fixes",
     "preview_audit": "Review how the live preview looks",
-    "venue_map": "Build or update the venue map",
     "finalize": "Wrap up and sync your proposal",
 }
 
@@ -48,8 +47,6 @@ def _heuristic_labels(message: str, step_ids: list[str]) -> dict[str, str]:
             out[step_id] = DEFAULT_LABELS[step_id]
         elif step_id == "preview_audit":
             out[step_id] = "Check the live preview (layout, map, buttons)"
-        elif step_id == "venue_map":
-            out[step_id] = "Generate interactive map from your floorplan or defaults"
         elif step_id == "finalize":
             out[step_id] = DEFAULT_LABELS[step_id]
         else:
@@ -97,7 +94,6 @@ def build_work_plan(
     *,
     message: str,
     include_preview_audit: bool,
-    include_venue_map: bool,
     short_path: bool = False,
 ) -> list[dict[str, Any]]:
     """Return ordered steps with stable ids tied to the designer chat pipeline."""
@@ -111,8 +107,6 @@ def build_work_plan(
     step_ids = ["understand_brief", "draft_proposal", "validate_repair"]
     if include_preview_audit:
         step_ids.append("preview_audit")
-    if include_venue_map:
-        step_ids.append("venue_map")
     step_ids.append("finalize")
 
     labels = personalize_plan_labels(message, step_ids)
@@ -123,13 +117,7 @@ def build_work_plan(
 
 
 def guess_include_venue_map(message: str, has_image_attachment: bool) -> bool:
-    if has_image_attachment and message_has_map_intent(message):
-        return True
-    lower = (message or "").lower()
-    if message_has_map_intent(message) and any(
-        p in lower for p in ("skip", "just create", "just build", "no questions")
-    ):
-        return True
+    """Deprecated — map is edited inside proposal html; kept for tests importing the name."""
     return message_has_map_intent(message) and has_image_attachment
 
 

@@ -39,10 +39,45 @@ def test_search_finds_href(sample_workspace):
     result = execute_template_tool(
         sample_workspace,
         "search_template",
-        {"file": "html", "query": "href="},
+        {"file": "html", "query": "href=", "mode": "line"},
     )
     assert result["ok"] is True
+    assert result["mode"] == "line"
     assert len(result["hits"]) == 1
+    assert result["hits"][0].get("line") == 1
+
+
+def test_search_hybrid_finds_css_rule(sample_workspace):
+    result = execute_template_tool(
+        sample_workspace,
+        "search_template",
+        {"file": "css", "query": "hero color styling", "mode": "hybrid"},
+    )
+    assert result["ok"] is True
+    assert result["mode"] == "hybrid"
+    assert result["hits"]
+    assert result["hits"][0].get("symbol_id")
+    assert "hero" in str(result["hits"][0].get("name", "")).lower()
+
+
+def test_search_hybrid_room_block_placeholder(sample_workspace):
+    ws = TemplateWorkspace(
+        html_markup=(
+            "<section id='rooms'><h2>Rooms</h2>"
+            "<tbody data-proposal-bind='verified_room_blocks'></tbody>"
+            "{{verified_room_blocks}}</section>"
+        ),
+        css_stylesheet="",
+        js_script="",
+    )
+    result = execute_template_tool(
+        ws,
+        "search_template",
+        {"file": "html", "query": "verified room block table", "kind": "proposal_section"},
+    )
+    assert result["ok"] is True
+    assert result["hits"]
+    assert result["hits"][0]["kind"] == "proposal_section"
 
 
 def test_replace_exact_single(sample_workspace):

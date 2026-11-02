@@ -28,13 +28,17 @@ import {
   type AgentToolStep,
   type AgentWorkPlanStep,
 } from "../lib/designerChatStream";
-import { isPlanningOnlyTodos, PLANNING_WAIT_TODOS } from "../lib/designerAgentTodos";
+import {
+  collapseCompletedExecutionTodos,
+  isPlanningOnlyTodos,
+  PLANNING_WAIT_TODOS,
+  todosIndicateActiveRun,
+} from "../lib/designerAgentTodos";
 import ConfirmDialog from "../components/designer/ConfirmDialog";
 import MediaLibraryDrawer from "../components/designer/MediaLibraryDrawer";
 import AgentRulesDialog from "../components/designer/AgentRulesDialog";
 import TemplateLibraryCard from "../components/designer/TemplateLibraryCard";
 import TemplateVersionHistoryDialog from "../components/designer/TemplateVersionHistoryDialog";
-import VenueMapsDrawer from "../components/designer/VenueMapsDrawer";
 import ShortcutHelpModal from "../components/designer/ShortcutHelpModal";
 import StudioPortalBootSplash from "../components/designer/StudioPortalBootSplash";
 import StudioPortalLogin from "../components/designer/StudioPortalLogin";
@@ -57,18 +61,17 @@ import TemplateIconButton, {
   IconTabletDevice,
   IconUndo,
 } from "../components/designer/TemplateIconButton";
-import { IconNavMap } from "../components/AppNavIcons";
 import {
   deleteTemplate,
   downloadJson,
   duplicateTemplate,
   exportTemplateBundle,
   fetchDesignerLiveProgress,
+  cancelDesignerAgentSession,
   listMediaAssets,
   listTemplates,
   loginDesigner,
   previewTemplate,
-  removeVenueMapSlotFromProposal,
   restoreRevision,
   saveTemplate,
   updateTemplate,
@@ -90,13 +93,6 @@ import {
   dismissLatestAssistantActionState,
   restoreDesignerActionUi,
 } from "../lib/designerChatActionState";
-import {
-  deleteVenueMap,
-  listVenueMaps,
-  restoreMapRevision,
-  updateVenueMap,
-  type VenueMapRecord,
-} from "../lib/mapStudioApi";
 import {
   readLastDesignerTemplateId,
   writeLastDesignerTemplateId,
@@ -166,7 +162,7 @@ export default function DesignerPortal() {
   const [busy, setBusy] = useState(false);
   const [agentWorkPlan, setAgentWorkPlan] = useState<AgentWorkPlanStep[]>([]);
   const [agentTodos, setAgentTodos] = useState<AgentWorkPlanStep[]>([]);
-  const [agentToolSteps, setAgentToolSteps] = useState<AgentToolStep[]>([]);
+  const [, setAgentToolSteps] = useState<AgentToolStep[]>([]);
   const [agentPartialProgress, setAgentPartialProgress] = useState<{
     completed: AgentProgressItem[];
     remaining: string[];
@@ -189,10 +185,6 @@ export default function DesignerPortal() {
   const [previewFullscreen, setPreviewFullscreen] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
   const [showLibrary, setShowLibrary] = useState(false);
-  const [showVenueMaps, setShowVenueMaps] = useState(false);
-  const [venueMaps, setVenueMaps] = useState<VenueMapRecord[]>([]);
-  const [selectedVenueMapId, setSelectedVenueMapId] = useState<string | null>(null);
-  const [confirmDeleteVenueMapId, setConfirmDeleteVenueMapId] = useState<string | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [mentionOpen, setMentionOpen] = useState(false);
@@ -319,6 +311,7 @@ export default function DesignerPortal() {
   }, []);
 
   const stopActiveAgentRequest = useCallback(() => {
+    void cancelDesignerAgentSession().catch(() => {});
     chatRunIdRef.current += 1;
     chatAbortRef.current?.abort();
     chatAbortRef.current = null;
@@ -393,23 +386,6 @@ export default function DesignerPortal() {
     setLibraryAssets(await listMediaAssets(activeId));
   }, [activeId]);
 
-  const refreshVenueMaps = useCallback(async () => {
-    const list = await listVenueMaps().catch(() => [] as VenueMapRecord[]);
-    setVenueMaps(list);
-    setSelectedVenueMapId((prev) => {
-      if (prev && list.some((m) => m.id === prev)) return prev;
-      return list.find((m) => m.is_default)?.id ?? list[0]?.id ?? null;
-    });
-  }, []);
-
-  const proposalHasMapSlot = useMemo(
-    () =>
-      html.includes("{{selected_map_svg}}") ||
-      html.includes("venue-map-proposal") ||
-      html.includes("venue-map-slot"),
-    [html],
-  );
-
   useEffect(() => {
     if (!authed) {
       restoredSelectionRef.current = false;
@@ -456,9 +432,8 @@ export default function DesignerPortal() {
   useEffect(() => {
     if (authed) {
       refreshLibrary().catch(() => setLibraryAssets([]));
-      refreshVenueMaps().catch(() => setVenueMaps([]));
     }
-  }, [authed, activeId, refreshLibrary, refreshVenueMaps]);
+  }, [authed, activeId, refreshLibrary]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -607,71 +582,6 @@ export default function DesignerPortal() {
       setPreviewDoc(compileLocalTemplatePreview(html, css, js));
     }
   }, [css, html, js, showSampleData]);
-
-  const handleSetDefaultVenueMap = async (id: string) => {
-    setBusy(true);
-    try {
-      await updateVenueMap(id, { is_default: true });
-      await refreshVenueMaps();
-      await refreshPreview();
-      showSnackbar("Default venue map updated.", "success");
-    } catch {
-      showSnackbar("Could not set default map.", "error");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const handleDeleteVenueMap = async (id: string) => {
-    setBusy(true);
-    try {
-      await deleteVenueMap(id);
-      setConfirmDeleteVenueMapId(null);
-      await refreshVenueMaps();
-      await refreshPreview();
-      showSnackbar("Venue map deleted.", "success");
-    } catch {
-      showSnackbar("Could not delete map.", "error");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const handleRestoreVenueMapRevision = async (mapId: string, index: number) => {
-    setBusy(true);
-    try {
-      await restoreMapRevision(mapId, index);
-      await refreshVenueMaps();
-      await refreshPreview();
-      showSnackbar("Map revision restored.", "success");
-    } catch {
-      showSnackbar("Could not restore revision.", "error");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const handleRemoveMapFromProposal = async () => {
-    pushUndo();
-    setBusy(true);
-    try {
-      const updated = await removeVenueMapSlotFromProposal(html, css);
-      setHtml(updated.html_markup);
-      setCss(updated.css_stylesheet);
-      if (activeId) {
-        await updateTemplate(activeId, {
-          html_markup: updated.html_markup,
-          css_stylesheet: updated.css_stylesheet,
-        });
-      }
-      await refreshPreview();
-      showSnackbar("Removed map section from this proposal.", "success");
-    } catch {
-      showSnackbar("Could not remove map section.", "error");
-    } finally {
-      setBusy(false);
-    }
-  };
 
   useEffect(() => {
     refreshPreview().catch(() => setPreviewDoc(""));
@@ -873,12 +783,19 @@ const PREVIEW_ISSUE_MESSAGE = /preview|not showing|close button|looks wrong|debu
         setAgentWorkPlan(data.work_plan);
       }
       if (data.agent_todos?.length) {
-        const normalized = normalizeAgentWorkPlanSteps(data.agent_todos);
+        let normalized = normalizeAgentWorkPlanSteps(data.agent_todos);
+        if (!data.partial_completion && !data.model_api_error) {
+          normalized = collapseCompletedExecutionTodos(normalized);
+        }
         agentTodosRef.current = normalized;
         setAgentTodos(normalized);
       } else if (isPlanningOnlyTodos(agentTodosRef.current)) {
         agentTodosRef.current = [];
         setAgentTodos([]);
+      } else if (!data.partial_completion && !data.model_api_error) {
+        agentTodosRef.current = [];
+        setAgentTodos([]);
+        setAgentWorkPlan([]);
       }
       setClarifications(data.clarification_options || []);
       if (data.partial_completion && data.continuation_recommended) {
@@ -920,21 +837,7 @@ const PREVIEW_ISSUE_MESSAGE = /preview|not showing|close button|looks wrong|debu
           "warning",
         );
       }
-      if (data.venue_maps_action || data.map_stage_applied || data.venue_map_id) {
-        void refreshVenueMaps();
-      }
-      if (data.venue_maps_action) {
-        showSnackbar("Venue map library updated.", "success");
-      }
-      if (data.map_stage_applied) {
-        showSnackbar(
-          data.venue_map_title
-            ? `Interactive map saved: ${data.venue_map_title}. Turn on sample data to preview.`
-            : "Interactive venue map updated for this proposal.",
-          "success",
-        );
-        setSrStatus("Proposal and venue map updated.");
-      } else if (data.self_check?.valid) {
+      if (data.self_check?.valid) {
         setSrStatus("Agent updated the proposal (automatic checks passed).");
       } else {
         setSrStatus("Agent updated the proposal template.");
@@ -1282,17 +1185,6 @@ const PREVIEW_ISSUE_MESSAGE = /preview|not showing|close button|looks wrong|debu
       <span className="studio-preview-toolbar-divider" aria-hidden />
       <TemplateIconButton
         compact
-        label="Venue maps — library, default, history"
-        selected={showVenueMaps}
-        onClick={() => {
-          void refreshVenueMaps();
-          setShowVenueMaps(true);
-        }}
-      >
-        <IconNavMap />
-      </TemplateIconButton>
-      <TemplateIconButton
-        compact
         label={showSampleData ? "Sample RFP data on" : "Sample RFP data off"}
         selected={showSampleData}
         onClick={() => setShowSampleData((v) => !v)}
@@ -1398,19 +1290,6 @@ const PREVIEW_ISSUE_MESSAGE = /preview|not showing|close button|looks wrong|debu
       />
       <ShortcutHelpModal open={showHelp} onClose={() => setShowHelp(false)} />
       <MediaLibraryDrawer open={showLibrary} assets={libraryAssets} onClose={() => setShowLibrary(false)} onAttach={(a) => setAttachments((p) => (p.find((x) => x.id === a.id) ? p : [...p, a]))} onInsertMention={insertMention} />
-      <VenueMapsDrawer
-        open={showVenueMaps}
-        maps={venueMaps}
-        selectedId={selectedVenueMapId}
-        busy={busy}
-        onClose={() => setShowVenueMaps(false)}
-        onSelect={(m) => setSelectedVenueMapId(m.id)}
-        onSetDefault={(id) => void handleSetDefaultVenueMap(id)}
-        onDelete={(id) => setConfirmDeleteVenueMapId(id)}
-        onRestoreRevision={(mapId, index) => void handleRestoreVenueMapRevision(mapId, index)}
-        onRemoveFromProposal={() => void handleRemoveMapFromProposal()}
-        proposalHasMapSlot={proposalHasMapSlot}
-      />
       <AgentRulesDialog open={showAgentRules} onClose={() => setShowAgentRules(false)} />
       <TemplateVersionHistoryDialog
         open={templateHistoryOpen && Boolean(activeId)}
@@ -1438,16 +1317,6 @@ const PREVIEW_ISSUE_MESSAGE = /preview|not showing|close button|looks wrong|debu
       />
       <ConfirmDialog open={confirmClear} title="Clear conversation?" message="Stops any in-progress design agent work and permanently clears chat for this template." onCancel={() => setConfirmClear(false)} onConfirm={() => void clearConversation()} />
       <ConfirmDialog open={confirmDelete} title="Delete template?" message="This permanently removes the template from your library." confirmLabel="Delete" onCancel={() => setConfirmDelete(false)} onConfirm={async () => { if (activeId) { await deleteTemplate(activeId); setActiveId(null); newTemplate(); await refreshTemplates(); } setConfirmDelete(false); }} />
-      <ConfirmDialog
-        open={Boolean(confirmDeleteVenueMapId)}
-        title="Delete venue map?"
-        message="This removes the map from your library. Proposals keep their map slot unless you remove it separately."
-        confirmLabel="Delete"
-        onCancel={() => setConfirmDeleteVenueMapId(null)}
-        onConfirm={() => {
-          if (confirmDeleteVenueMapId) void handleDeleteVenueMap(confirmDeleteVenueMapId);
-        }}
-      />
 
       <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden px-4 pb-[var(--studio-safe-bottom)] pt-3 sm:flex-row sm:px-6">
         <aside className="studio-shell-panel flex max-h-[32vh] w-full shrink-0 flex-col sm:max-h-none sm:w-64">
@@ -1566,7 +1435,9 @@ const PREVIEW_ISSUE_MESSAGE = /preview|not showing|close button|looks wrong|debu
             )}
             <DesignerAgentProgress
               active={
-                busy || agentTodos.length > 0 || Boolean(agentPartialProgress)
+                busy ||
+                Boolean(agentPartialProgress) ||
+                todosIndicateActiveRun(agentTodos)
               }
               steps={agentWorkPlan}
               tasks={agentTodos}

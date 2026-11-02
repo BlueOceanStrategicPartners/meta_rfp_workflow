@@ -4,16 +4,22 @@ from django.conf import settings
 from django.db import models, transaction
 
 
-REQUIRED_PLACEHOLDERS = [
+OPTIONAL_PLACEHOLDERS: list[str] = []
+
+MANDATORY_PLACEHOLDERS = [
     "{{client_name}}",
     "{{event_dates}}",
     "{{verified_room_blocks}}",
-    "{{selected_map_svg}}",
     "{{meeting_space_specs}}",
     "{{xgboost_quote_breakdown}}",
     "{{negotiated_concessions}}",
     "{{cta_accept_button}}",
 ]
+
+# Mandatory tokens for save/validate (interactive map is a normal section in html_markup).
+REQUIRED_PLACEHOLDERS = MANDATORY_PLACEHOLDERS
+
+ALL_BINDING_PLACEHOLDERS = list(MANDATORY_PLACEHOLDERS)
 
 
 class ProposalTemplate(models.Model):
@@ -31,6 +37,8 @@ class ProposalTemplate(models.Model):
     is_default = models.BooleanField(default=False)
     chat_history_json = models.JSONField(default=list)
     revision_history_json = models.JSONField(default=list, blank=True)
+    langgraph_thread_id = models.CharField(max_length=160, blank=True, default="")
+    langgraph_checkpoint_id = models.CharField(max_length=128, blank=True, default="")
     updated_at = models.DateTimeField(auto_now=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -83,13 +91,6 @@ class DesignerMediaAsset(models.Model):
     )
     template = models.ForeignKey(
         ProposalTemplate,
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="media_assets",
-    )
-    venue_map = models.ForeignKey(
-        "inventory.InteractiveVenueMap",
         on_delete=models.SET_NULL,
         null=True,
         blank=True,

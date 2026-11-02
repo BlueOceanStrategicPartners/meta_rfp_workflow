@@ -6,11 +6,11 @@ from typing import Any, Callable
 
 from django.conf import settings
 
-from apps.designer_studio.models import REQUIRED_PLACEHOLDERS
+from apps.designer_studio.models import MANDATORY_PLACEHOLDERS
 from apps.designer_studio.services import compile_template, deterministic_template_checks
 from apps.rfp_debate.meta_client import MetaModelClient
 
-from .context_budget import trim_chat_history, trim_context_block, trim_template_fields
+from .context_budget import assemble_context_prefix, trim_chat_history, trim_context_block, trim_template_fields
 from .design_agent_tool_loop import (
     DesignerToolLoopRunner,
     PreviewEventCallback,
@@ -18,20 +18,29 @@ from .design_agent_tool_loop import (
     ToolEventCallback,
 )
 from .designer_langgraph import DesignerAgentGraph
+from .designer_validation import VALIDATION_SYSTEM_PROMPT
+from .placeholder_guidance import (
+    design_agent_binding_guidance,
+    repair_placeholder_guidance,
+    save_validation_placeholder_guidance,
+)
 from .template_alignment import collect_alignment_issues
 
 logger = logging.getLogger(__name__)
 
 DESIGNER_SYSTEM_PROMPT = (
     "You are the Proposal Template Architect for a hospitality RFP platform. "
-    "You own BOTH the proposal HTML/CSS/JS AND coordinating the interactive venue map "
-    "(users do not use a separate Map Studio — everything happens in this chat).\n\n"
-    "WORKFLOW (two stages in one conversation):\n"
-    "1) Proposal — layout, tokens, branding, media embeds.\n"
-    "2) Venue map — after the proposal has {{selected_map_svg}} in a .venue-map-slot, "
-    "guide the user to upload a floorplan image OR say they want a generic map. "
-    "The platform may auto-build the interactive map on the next turn when they attach an image "
-    "or say 'skip questions / just create'.\n\n"
+    "You edit ONE self-contained HTML file per proposal (Tailwind CDN + utility classes + inline <script>).\n\n"
+    "WORKFLOW (tool loop uses AGENT MODE in each message — pool-calling, not search loops):\n"
+    "1) GREENFIELD: append_template(html) first with all sections + placeholders.\n"
+    "2) UPDATE: list_template_symbols or search_template (hybrid) → read_template_symbol → replace_lines.\n"
+    "3) Maps: get_map_knowledge / get_map_reference_code once, edit .venue-map-proposal section.\n\n"
+    "COPY / LABELS:\n"
+    "- Nav badges and map hints must use real characters (• — ✦) or HTML entities, never \\u2022 / \\U2022 "
+    "escape literals in HTML — they show as garbage text to guests.\n\n"
+    "NAVIGATION:\n"
+    "- Proposal is one scrollable page: every CTA/nav control uses href=\"#section-id\" matching <section id>.\n"
+    "- Do not use root-relative paths (/rooms, /designer) — they break live preview and client embed.\n\n"
     "FOLLOW-UP QUESTIONS (clarification_options):\n"
     "- Ask ONLY when a decision blocks progress (missing floorplan, ambiguous zone names, "
     "conflicting layout requests).\n"
@@ -45,28 +54,24 @@ DESIGNER_SYSTEM_PROMPT = (
     "- Key zones to label (ballrooms, breakouts, foyer, outdoor).\n"
     "- Optional: capacity notes or photo galleries per zone.\n\n"
     "MAP LIBRARY:\n"
-    "- Saved venue maps, default selection, delete, and remove-from-proposal are handled by the platform "
-    "(Live preview → Venue maps, or chat commands like list maps / set default / delete map).\n"
-    "- Do not direct users to a separate Map Studio.\n\n"
+    "- There is no separate map library or Map Studio — build and edit the map section in proposal html_markup.\n\n"
     "Return JSON only with keys: assistant_message (string), html_markup (string), "
-    "css_stylesheet (string), js_script (string), "
+    "css_stylesheet (string, leave empty for new templates), js_script (string, leave empty for new templates), "
     "clarification_options (optional string array of short clickable replies when you need input). "
-    f"html_markup MUST include every binding token exactly once: "
-    f"{', '.join(REQUIRED_PLACEHOLDERS)}. "
-    "For {{selected_map_svg}}: use a venue-map-proposal section with "
-    "<div class='venue-map-slot'>{{selected_map_svg}}</div> — the platform injects the "
-    "interactive map at preview time; never replace the token with inline SVG only. "
-    "Put interactivity in js_script (no inline onclick). "
+    f"html_markup MUST be ONE self-contained HTML document using Tailwind CSS (cdn.tailwindcss.com) with "
+    f"all structure, styling (utility classes), and <script> in that file. "
+    f"Do not split css_stylesheet or js_script for new work — leave them as empty strings. "
+    f"html_markup MUST include each mandatory binding token exactly once: "
+    f"{', '.join(MANDATORY_PLACEHOLDERS)}. "
+    "Bindings compile to JSON — wire placeholders per proposal_binding_schema.md (script type=application/json + data-proposal-bind tbody for line_items arrays). "
+    f"Optional map section: use <section class=\"venue-map-proposal\"> with .venue-map-root#venue-map — "
+    f"omit the section when the user says no map. "
+    f"Do NOT use {{{{selected_map_svg}}}} — map markup lives inline in html_markup. "
+    "Put proposal interactivity in a <script> at the bottom of html_markup (no inline onclick). "
     "Embed uploaded images/videos using the absolute URLs provided in the attachments block. "
     "Use semantic HTML5, responsive CSS Grid/Flexbox, and {{cta_accept_button}} for accept CTA.\n\n"
-    "DATES & COPY:\n"
-    "- Put all event dates in {{event_dates}} and rooming in {{verified_room_blocks}} — "
-    "do not hardcode calendar dates in marketing copy.\n"
-    "- If the user asks for U.S. style (MM/DD/YYYY), confirm in assistant_message but keep tokens; "
-    "never show ISO YYYY-MM-DD in visible text or example badges.\n"
-    "- Never hide .proposal-cta with display:none at default/desktop breakpoints "
-    "(map popups may use .hidden{display:none} on non-CTA elements).\n\n"
-    "VALIDATION (automatic — never delegate to the user):\n"
+    + design_agent_binding_guidance()
+    + "\n\nVALIDATION (automatic — never delegate to the user):\n"
     "- The platform runs layout and template checks after every turn.\n"
     "- Fix placeholder, CTA visibility, date format, and responsive layout issues in your output.\n"
     "- Never tell the user to click Validate, run checks themselves, or ask them to fix validation errors.\n\n"
@@ -79,26 +84,21 @@ REPAIR_SYSTEM_PROMPT = (
     "You repair hospitality proposal HTML/CSS/JS templates before delivery. "
     "Return JSON only: assistant_message, html_markup, css_stylesheet, js_script, "
     "clarification_options (optional, usually empty). "
-    f"Preserve every required placeholder exactly once: {', '.join(REQUIRED_PLACEHOLDERS)}. "
-    "Fix all listed validation issues while honoring the user's original request."
-)
-
-VALIDATION_SYSTEM_PROMPT = (
-    "You validate compiled hospitality proposal HTML/CSS/JS templates against the user's brief. "
-    "Return JSON only: valid (boolean), issues (string array), summary (string). "
-    "Check placeholders, media embeds, CTA visibility (accept button must not use display:none), "
-    "responsive layout, JS safety, and that visible dates match the requested locale/format "
-    "(U.S. MM/DD/YYYY vs ISO) when the brief mentions it."
+    f"Preserve every mandatory placeholder exactly once: {', '.join(MANDATORY_PLACEHOLDERS)}. "
+    "Fix all listed validation issues while honoring the user's original request.\n\n"
+    + repair_placeholder_guidance()
 )
 
 SAVE_VALIDATION_SYSTEM_PROMPT = (
     "You validate hospitality proposal templates BEFORE SAVE to the template library. "
     "Return JSON only: valid (boolean), issues (string array), summary (string). "
-    f"Source html_markup MUST keep each binding token exactly once: {', '.join(REQUIRED_PLACEHOLDERS)}. "
+    f"Source html_markup MUST keep each mandatory binding token exactly once: {', '.join(MANDATORY_PLACEHOLDERS)}. "
+    "Venue map section is optional inline markup — omit when user removed the map. "
     "Tokens in source HTML are required — never flag them as missing or unresolved. "
     "Judge layout, CTA visibility (accept control visible at desktop), responsive CSS, and JS safety "
     "using the compiled preview (sample data already substituted). "
-    "Only list REAL blockers that would break client preview or accept flow."
+    "Only list REAL blockers that would break client preview or accept flow.\n\n"
+    + save_validation_placeholder_guidance()
 )
 
 _SAVE_SPURIOUS_ISSUE_PHRASES = (
@@ -119,8 +119,10 @@ def _filter_save_muse_issues(issues: list[str]) -> list[str]:
 
 SAVE_REPAIR_BRIEF = (
     "Prepare this hospitality proposal template for save. "
-    f"Preserve every required placeholder exactly once: {', '.join(REQUIRED_PLACEHOLDERS)}. "
-    "Fix CTA visibility, responsive layout, token placement, and JS safety only."
+    f"Preserve every mandatory placeholder exactly once: {', '.join(MANDATORY_PLACEHOLDERS)}. "
+    "Venue map is an optional inline section in html_markup. "
+    "Fix CTA visibility, responsive layout, token placement, and JS safety only.\n\n"
+    + repair_placeholder_guidance()
 )
 
 WorkStepCallback = Callable[[str, str], None]
@@ -170,7 +172,7 @@ class DesignerStudioAgent:
         css_stylesheet: str,
         js_script: str = "",
         attachment_block: str = "",
-        venue_map_block: str = "",
+        map_knowledge_block: str = "",
         preview_audit_block: str = "",
         preview_automation_block: str = "",
         agent_rules_block: str = "",
@@ -180,11 +182,12 @@ class DesignerStudioAgent:
         on_preview_event: PreviewEventCallback | None = None,
         user_id: int | str | None = None,
         template_id: str | None = None,
+        graph_thread_id: str | None = None,
     ) -> dict[str, Any]:
         mode = resolve_designer_agent_mode()
         if mode != "full_document":
             context_prefix = self._build_context_prefix(
-                venue_map_block=venue_map_block,
+                map_knowledge_block=map_knowledge_block,
                 attachment_block=attachment_block,
                 agent_rules_block=agent_rules_block,
                 preview_audit_block=preview_audit_block,
@@ -200,6 +203,7 @@ class DesignerStudioAgent:
                 context_prefix=context_prefix,
                 user_id=user_id,
                 template_id=template_id,
+                graph_thread_id=graph_thread_id,
                 on_work_step=on_work_step,
                 on_tool_event=on_tool_event,
                 on_todo_event=on_todo_event,
@@ -213,7 +217,7 @@ class DesignerStudioAgent:
             css_stylesheet=css_stylesheet,
             js_script=js_script,
             attachment_block=attachment_block,
-            venue_map_block=venue_map_block,
+            map_knowledge_block=map_knowledge_block,
             preview_audit_block=preview_audit_block,
             preview_automation_block=preview_automation_block,
             agent_rules_block=agent_rules_block,
@@ -223,14 +227,14 @@ class DesignerStudioAgent:
     def _build_context_prefix(
         self,
         *,
-        venue_map_block: str,
+        map_knowledge_block: str,
         attachment_block: str,
         agent_rules_block: str,
         preview_audit_block: str,
         preview_automation_block: str,
     ) -> str:
-        venue_map_block = trim_context_block(venue_map_block)
-        attachment_block = trim_context_block(attachment_block)
+        map_knowledge_block = trim_context_block(map_knowledge_block, kind="map")
+        attachment_block = trim_context_block(attachment_block, kind="attachment")
         rules_section = trim_context_block(agent_rules_block) if agent_rules_block else ""
         audit_section = trim_context_block(preview_audit_block) if preview_audit_block else ""
         automation_section = (
@@ -238,8 +242,9 @@ class DesignerStudioAgent:
             if preview_automation_block
             else ""
         )
-        parts = [venue_map_block, attachment_block, rules_section, audit_section, automation_section]
-        return trim_context_block("\n\n".join(p for p in parts if p.strip()))
+        return assemble_context_prefix(
+            [attachment_block, audit_section, automation_section, rules_section, map_knowledge_block]
+        )
 
     def _chat_turn_full_document(
         self,
@@ -250,7 +255,7 @@ class DesignerStudioAgent:
         css_stylesheet: str,
         js_script: str = "",
         attachment_block: str = "",
-        venue_map_block: str = "",
+        map_knowledge_block: str = "",
         preview_audit_block: str = "",
         preview_automation_block: str = "",
         agent_rules_block: str = "",
@@ -260,7 +265,7 @@ class DesignerStudioAgent:
         html_markup, css_stylesheet, js_script = trim_template_fields(
             html_markup, css_stylesheet, js_script
         )
-        venue_map_block = trim_context_block(venue_map_block)
+        map_knowledge_block = trim_context_block(map_knowledge_block)
         attachment_block = trim_context_block(attachment_block)
         audit_section = trim_context_block(preview_audit_block) if preview_audit_block else ""
         rules_section = trim_context_block(agent_rules_block) if agent_rules_block else ""
@@ -270,7 +275,7 @@ class DesignerStudioAgent:
             else ""
         )
         user_payload = (
-            f"{venue_map_block}\n\n"
+            f"{map_knowledge_block}\n\n"
             f"{attachment_block}\n\n"
             f"{rules_section}\n\n" if rules_section else ""
         ) + (

@@ -1,0 +1,81 @@
+{
+  "schema_version": 1,
+  "description": "Canonical seed for proposal template bindings. Templates read JSON via script[type=application/json] and proposal_binding_runtime.js hydrates tables.",
+  "event_overview": {
+    "company_name": "Acme Corporation",
+    "event_type": "Corporate Summit",
+    "check_in_date": "2026-11-14",
+    "check_out_date": "2026-11-17",
+    "check_in_display": "Thu, Nov 14 · From 3:00 PM",
+    "check_out_display": "Sun, Nov 17 · Until 12:00 PM",
+    "guest_count": 170,
+    "availability_status": "Live availability verified"
+  },
+  "event_dates": {
+    "check_in": "2026-11-14",
+    "check_out": "2026-11-17",
+    "display_range": "Nov 14 – 17, 2026",
+    "nights": 3
+  },
+  "verified_room_blocks": {
+    "line_items": [
+      {
+        "category_name": "Deluxe Ocean View",
+        "category_subtitle": "King + balcony · Sleeps 2",
+        "badge": "",
+        "date_range": "Nov 14 – 17, 2026",
+        "nights": 3,
+        "quantity": 50,
+        "rate_per_night": 189,
+        "estimated_total": 28350
+      },
+      {
+        "category_name": "Azure Executive Suite",
+        "category_subtitle": "Lounge + soaking tub · Club access",
+        "badge": "MOST PICKED",
+        "date_range": "Nov 14 – 17, 2026",
+        "nights": 3,
+        "quantity": 25,
+        "rate_per_night": 329,
+        "estimated_total": 24675
+      },
+      {
+        "category_name": "Beachfront Villa",
+        "category_subtitle": "Plunge pool + cabana · Butler",
+        "badge": "",
+        "date_range": "Nov 14 – 17, 2026",
+        "nights": 3,
+        "quantity": 10,
+        "rate_per_night": 549,
+        "estimated_total": 16470
+      }
+    ],
+    "summary": {
+      "rooms_per_night": 85,
+      "nights": 3,
+      "room_nights": 255,
+      "avg_rate_per_night": 272,
+      "grand_total": 69495,
+      "policy_notes": "Free cancellation to Oct 15 · 80% attrition allowed · Complimentary 1 per 40"
+    },
+    "blocks": []
+  },
+  "meeting_space_specs": {
+    "name": "Grand Sapphire Ballroom",
+    "seating_style": "Classroom",
+    "headcount": 250,
+    "av": "Dual 4K projectors"
+  },
+  "xgboost_quote_breakdown": {
+    "walk_away_floor_price": 42000,
+    "optimal_target_price": 48500,
+    "initial_anchor_price": 52000,
+    "currency": "USD"
+  },
+  "negotiated_concessions": {
+    "items": [
+      "Complimentary AV upgrade",
+      "Late checkout for VIP suite"
+    ]
+  }
+}

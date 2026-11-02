@@ -10,21 +10,25 @@ from rest_framework.views import APIView
 
 from apps.accounts_rbac.permissions import IsDesignerRole
 from apps.core.renderers import ServerSentEventsRenderer
+from apps.core.exceptions import TemplateValidationException
 from apps.guardrails.validators import sanitize_template_html, sanitize_template_js
 
 from .designer_chat_service import iter_designer_chat, run_designer_chat_sync, sse_line, sse_preamble
-from .designer_live_progress import get_live_progress
+from .designer_live_progress import get_live_progress, request_designer_agent_cancel
 from .design_agent import DesignerStudioAgent
 from .media_service import save_designer_asset
-from .models import DesignerMediaAsset, ProposalTemplate, REQUIRED_PLACEHOLDERS
+from .models import (
+    ALL_BINDING_PLACEHOLDERS,
+    DesignerMediaAsset,
+    MANDATORY_PLACEHOLDERS,
+    ProposalTemplate,
+)
+from .proposal_template_normalize import normalize_proposal_template_fields
 from .revisions import append_revision
 from .serializers import DesignerMediaAssetSerializer, ProposalTemplateSerializer
 from .services import compile_template, deterministic_template_checks
-from .venue_map_context import (
-    default_map_designer_payload,
-    inject_map_section_into_template,
-    remove_map_slot_from_template,
-)
+from .single_file_template import effective_style_and_script, template_storage_mode
+
 
 logger = logging.getLogger(__name__)
 
@@ -43,30 +47,40 @@ class ProposalTemplateListCreateView(generics.ListCreateAPIView):
         css = serializer.validated_data.get("css_stylesheet", "")
         js = serializer.validated_data.get("js_script", "")
         html, css, js = self._prepare_for_save(html, css, js)
-        clean_html = sanitize_template_html(html)
-        clean_js = sanitize_template_js(js)
+        try:
+            clean_html = sanitize_template_html(html, css=css, js_script=js)
+        except TemplateValidationException as exc:
+            raise DRFValidationError(str(exc)) from exc
+        if template_storage_mode(html, css, js) == "single":
+            clean_js = ""
+        else:
+            _, eff_js = effective_style_and_script(html, css, js)
+            try:
+                clean_js = sanitize_template_js(eff_js)
+            except TemplateValidationException as exc:
+                raise DRFValidationError(str(exc)) from exc
         instance = serializer.save(
             designer=self.request.user,
             html_markup=clean_html,
             css_stylesheet=css,
             js_script=clean_js,
-            required_placeholders_json=REQUIRED_PLACEHOLDERS,
+            required_placeholders_json=MANDATORY_PLACEHOLDERS,
         )
         append_revision(instance, note="create")
         instance.save(update_fields=["revision_history_json"])
 
     @staticmethod
     def _prepare_for_save(html: str, css: str, js: str = "") -> tuple[str, str, str]:
+        html, css, js = normalize_proposal_template_fields(html, css, js)
         agent = DesignerStudioAgent()
         try:
             prepared = agent.prepare_for_save(html, css, js)
         except ValueError as exc:
             raise DRFValidationError(str(exc)) from exc
-        return (
-            prepared.get("html_markup") or html,
-            prepared.get("css_stylesheet") or css,
-            prepared.get("js_script") or js,
-        )
+        out_html = prepared.get("html_markup") or html
+        out_css = prepared.get("css_stylesheet") or css
+        out_js = prepared.get("js_script") or js
+        return normalize_proposal_template_fields(out_html, out_css, out_js)
 
     @staticmethod
     def _validate_before_save(html: str, css: str, js: str = "") -> None:
@@ -101,8 +115,18 @@ class ProposalTemplateDetailView(generics.RetrieveUpdateDestroyAPIView):
         )
         js = serializer.validated_data.get("js_script", serializer.instance.js_script)
         html, css, js = ProposalTemplateListCreateView._prepare_for_save(html, css, js)
-        clean_html = sanitize_template_html(html)
-        clean_js = sanitize_template_js(js)
+        try:
+            clean_html = sanitize_template_html(html, css=css, js_script=js)
+        except TemplateValidationException as exc:
+            raise DRFValidationError(str(exc)) from exc
+        if template_storage_mode(html, css, js) == "single":
+            clean_js = ""
+        else:
+            _, eff_js = effective_style_and_script(html, css, js)
+            try:
+                clean_js = sanitize_template_js(eff_js)
+            except TemplateValidationException as exc:
+                raise DRFValidationError(str(exc)) from exc
         chat_history = serializer.validated_data.get(
             "chat_history_json", serializer.instance.chat_history_json
         )
@@ -236,6 +260,14 @@ class DesignerChatLiveProgressView(APIView):
         return Response(payload)
 
 
+class DesignerChatCancelView(APIView):
+    permission_classes = [IsDesignerRole]
+
+    def post(self, request):
+        request_designer_agent_cancel(user_id=request.user.pk)
+        return Response({"cancelled": True})
+
+
 class DesignerPreviewAuditView(APIView):
     permission_classes = [IsDesignerRole]
 
@@ -361,39 +393,26 @@ class DefaultTemplateView(generics.RetrieveAPIView):
         return ProposalTemplate.objects.filter(is_default=True).first()
 
 
-class DesignerDefaultVenueMapView(APIView):
-    """Read system default map for Designer Studio agents and toolbar."""
+class DesignerMapKnowledgeView(APIView):
+    """Read-only Map Knowledge (same payload as designer get_map_knowledge / get_map_reference_code tools)."""
 
     permission_classes = [IsDesignerRole]
 
     def get(self, request):
-        return Response(default_map_designer_payload())
+        from apps.venue_map_studio.map_knowledge_tools import execute_map_knowledge_tool
 
-
-class DesignerInjectDefaultMapView(APIView):
-    """Insert venue-map section + slot CSS around {{selected_map_svg}}."""
-
-    permission_classes = [IsDesignerRole]
-
-    def post(self, request):
-        html = request.data.get("html_markup") or ""
-        css = request.data.get("css_stylesheet") or ""
-        updated = inject_map_section_into_template(html, css)
-        payload = default_map_designer_payload()
-        return Response({**updated, "default_map": payload})
-
-
-class DesignerRemoveVenueMapSlotView(APIView):
-    """Remove venue map section from proposal HTML (saved map library unchanged)."""
-
-    permission_classes = [IsDesignerRole]
-
-    def post(self, request):
-        html = request.data.get("html_markup") or ""
-        css = request.data.get("css_stylesheet") or ""
-        return Response(
-            {
-                "html_markup": remove_map_slot_from_template(html),
-                "css_stylesheet": css,
-            }
-        )
+        topic = request.query_params.get("topic")
+        part = request.query_params.get("part")
+        floorplan_url = request.query_params.get("floorplan_url")
+        if part:
+            result = execute_map_knowledge_tool(
+                "get_map_reference_code",
+                {"part": part, "floorplan_url": floorplan_url},
+            )
+        else:
+            result = execute_map_knowledge_tool(
+                "get_map_knowledge",
+                {"topic": topic or "overview"},
+            )
+        status_code = status.HTTP_200_OK if result.get("ok") else status.HTTP_400_BAD_REQUEST
+        return Response(result, status=status_code)

@@ -38,7 +38,7 @@ def test_html_element_symbols():
     )
     syms = index_template_file(ws, "html")
     names = {s.name for s in syms}
-    assert "#top" in names or ".main-nav" in names
+    assert "header#top" in names or "#top" in names or ".main-nav" in names
 
 
 def test_js_function_symbol():
@@ -46,3 +46,34 @@ def test_js_function_symbol():
     ws = TemplateWorkspace(html_markup="", css_stylesheet="", js_script=js)
     syms = index_template_file(ws, "js")
     assert any(s.name == "initMap" for s in syms)
+
+
+def test_list_symbols_semantic_query_ranks_sections():
+    html = """<section id="pricing" class="p-4"><h2>Pricing breakdown</h2></section>
+<section id="map" class="venue-map-proposal"><h2>Venue floorplan</h2></section>"""
+    ws = TemplateWorkspace(html_markup=html, css_stylesheet="", js_script="")
+    listed = execute_list_template_symbols(
+        ws, {"file": "html", "kind": "proposal_section", "query": "interactive map floorplan"}
+    )
+    assert listed["ok"]
+    assert listed["symbols"][0]["name"].lower().find("map") >= 0 or "venue" in listed["symbols"][0]["name"].lower()
+
+    html = """<!DOCTYPE html><html><body>
+<section id="hero" class="p-8"><h1>Welcome</h1></section>
+<section class="venue-map-proposal" aria-label="Map">
+<div id="venue-map"><script>function initMap(){}</script></div>
+</section>
+</body></html>"""
+    ws = TemplateWorkspace(html_markup=html, css_stylesheet="", js_script="")
+    listed = execute_list_template_symbols(ws, {"file": "html", "kind": "proposal_section"})
+    assert listed["ok"]
+    assert listed["shown"] >= 2
+    ids = {s["kind"] for s in listed["symbols"]}
+    assert ids == {"proposal_section"}
+    map_sym = next(
+        s for s in listed["symbols"] if "map" in s["name"].lower() or "venue" in s["name"].lower()
+    )
+    read = execute_read_template_symbol(ws, {"symbol_id": map_sym["id"]})
+    assert read["ok"]
+    assert "initMap" in read["content"]
+    assert "venue-map" in read["content"]

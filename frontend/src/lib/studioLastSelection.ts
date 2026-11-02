@@ -1,5 +1,4 @@
 const DESIGNER_TEMPLATE_KEY = "rfp_designer_last_template_id";
-const MAP_STUDIO_KEY = "rfp_map_studio_last_map_id";
 
 function read(key: string): string | null {
   try {
@@ -24,12 +23,4 @@ export function readLastDesignerTemplateId(): string | null {
 
 export function writeLastDesignerTemplateId(id: string | null) {
   write(DESIGNER_TEMPLATE_KEY, id);
-}
-
-export function readLastMapStudioId(): string | null {
-  return read(MAP_STUDIO_KEY);
-}
-
-export function writeLastMapStudioId(id: string | null) {
-  write(MAP_STUDIO_KEY, id);
 }

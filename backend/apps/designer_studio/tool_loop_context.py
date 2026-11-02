@@ -8,6 +8,7 @@ with explicit ``*_omitted`` / ``content_truncated`` markers.
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 from django.conf import settings
@@ -15,20 +16,27 @@ from django.conf import settings
 from apps.designer_studio.services import deterministic_template_checks
 from apps.designer_studio.template_agent_tools import human_tool_label
 
+from .designer_map_intent import message_has_map_intent
 from .designer_user_labels import format_user_tool_trace_summary
 
 from .designer_fast_edit import format_edit_target_hints
+from .agent_workflow_playbooks import (
+    build_designer_request_footer,
+    build_pool_calling_playbook,
+    resolve_agent_workflow_mode,
+)
 from .template_symbol_index import compact_structure_outline
 from .template_workspace import TemplateWorkspace
 
-DEFAULT_CONDENSE_AFTER_PAIRS = 8
-DEFAULT_KEEP_RECENT_PAIRS = 4
-DEFAULT_TOOL_RESULT_CHARS = 4000
-DEFAULT_LOOP_MESSAGE_BUDGET = 48000
-DEFAULT_MAX_ISSUES_IN_PAYLOAD = 12
-DEFAULT_MAX_HITS_IN_PAYLOAD = 10
-DEFAULT_MAX_READ_CONTENT_CHARS = 2800
-DEFAULT_MAX_SYMBOLS_IN_PAYLOAD = 16
+DEFAULT_CONDENSE_AFTER_PAIRS = 10
+DEFAULT_KEEP_RECENT_PAIRS = 5
+DEFAULT_TOOL_RESULT_CHARS = 9000
+DEFAULT_LOOP_MESSAGE_BUDGET = 72000
+DEFAULT_MAX_ISSUES_IN_PAYLOAD = 16
+DEFAULT_MAX_HITS_IN_PAYLOAD = 12
+DEFAULT_MAX_READ_CONTENT_CHARS = 12000
+DEFAULT_MAX_SYMBOLS_IN_PAYLOAD = 32
+DEFAULT_MAX_SECTION_READ_CHARS = 24000
 
 
 def _int(name: str, default: int) -> int:
@@ -65,32 +73,194 @@ def last_assistant_action_state(history: list[dict] | None) -> dict[str, Any] | 
     return None
 
 
+def user_follow_up_is_correction(message: str) -> bool:
+    """User says the prior edit did not work (still broken, still there, etc.)."""
+    lower = (message or "").lower().strip()
+    if len(lower) < 4:
+        return False
+    cues = (
+        "still ",
+        "still,",
+        "still have",
+        "still we",
+        "doesn't work",
+        "didn't work",
+        "not fixed",
+        "not removed",
+        "you didn't",
+        "you did not",
+        "same issue",
+        "same problem",
+        "no change",
+        "nothing changed",
+    )
+    return any(c in lower for c in cues)
+
+
+def prior_user_message_from_history(
+    history: list[dict] | None,
+    *,
+    skip_continue: bool = True,
+) -> str:
+    """Most recent user turn before the current request (history excludes current message)."""
+    for turn in reversed(history or []):
+        if turn.get("role") != "user":
+            continue
+        content = str(turn.get("content") or "").strip()
+        if not content:
+            continue
+        if skip_continue and user_wants_continuation(content):
+            continue
+        return content[:4000]
+    return ""
+
+
+def build_edit_ledger_from_tool_trace(tool_trace: list[dict[str, Any]]) -> dict[str, Any]:
+    """Compact record of executor mutations — persisted on the assistant turn for the next message."""
+    from .agent_task_plan import MUTATE_TOOLS
+
+    mutations: list[dict[str, Any]] = []
+    for entry in tool_trace or []:
+        tool = str(entry.get("tool") or "")
+        result = entry.get("result") if isinstance(entry.get("result"), dict) else {}
+        if tool not in MUTATE_TOOLS and tool != "append_template":
+            continue
+        row: dict[str, Any] = {"tool": tool, "turn": entry.get("turn"), "ok": bool(result.get("ok"))}
+        if not result.get("ok"):
+            row["error"] = str(result.get("error") or "")[:200]
+            mutations.append(row)
+            continue
+        if tool == "replace_lines":
+            row["file"] = result.get("file")
+            row["start_line"] = result.get("start_line")
+            row["end_line"] = result.get("end_line")
+        elif tool == "replace_exact":
+            row["file"] = result.get("file")
+            row["replacements"] = result.get("replacements")
+        elif tool == "append_template":
+            row["appended_chars"] = result.get("appended_chars")
+        gate = result.get("validation_after_mutate")
+        if isinstance(gate, dict):
+            row["post_edit_valid"] = bool(gate.get("valid"))
+            if not gate.get("valid"):
+                row["post_edit_issues"] = list(gate.get("issues") or [])[:6]
+                diags = gate.get("diagnostics") or []
+                if diags:
+                    row["post_edit_diagnostics"] = diags[:4]
+        mutations.append(row)
+    ok_count = sum(1 for m in mutations if m.get("ok"))
+    return {
+        "mutation_count": ok_count,
+        "mutations": mutations[-20:],
+        "tools_run": len(tool_trace or []),
+    }
+
+
+def detect_likely_unmet_request(prior_user_message: str, workspace: TemplateWorkspace) -> list[str]:
+    """Heuristic: user asked for X but template still contains contradictory markup."""
+    gaps: list[str] = []
+    prior = (prior_user_message or "").lower()
+    html = workspace.html_markup or ""
+    if not prior or not html:
+        return gaps
+    if "remove" in prior and (
+        "last row" in prior
+        or "last table" in prior
+        or "total row" in prior
+        or "no need" in prior
+    ):
+        if "room-block-total-row" in html or re.search(r"Total block", html, re.I):
+            gaps.append(
+                "Prior request was to REMOVE the duplicate table total/summary row — "
+                "markup still contains room-block-total-row or a Total block table row. "
+                "Delete that <tr> (runtime summary footer is enough); do not restyle the row."
+            )
+    return gaps
+
+
+def build_prior_turn_session_block(
+    *,
+    history: list[dict] | None,
+    workspace: TemplateWorkspace,
+    current_message: str,
+) -> str:
+    """
+    Tool-loop intro block: prior user intent + mutations from last turn (not in chat history text).
+    """
+    prior_user = prior_user_message_from_history(history)
+    if not prior_user and not history:
+        return ""
+
+    st = last_assistant_action_state(history) or {}
+    ledger = st.get("edit_ledger") if isinstance(st.get("edit_ledger"), dict) else {}
+    mutations = ledger.get("mutations") or []
+    last_claim = str(st.get("last_assistant_message") or "")[:400]
+    correction = user_follow_up_is_correction(current_message)
+
+    lines = ["PRIOR TURN CONTEXT (authoritative — do not ignore on follow-ups):"]
+    if prior_user:
+        lines.append(f"- Previous user request:\n{prior_user[:2000]}")
+    if last_claim:
+        lines.append(f"- Assistant told the user: {last_claim!r}")
+    if mutations:
+        lines.append("- Template mutations applied that turn:")
+        for m in mutations[-8:]:
+            if m.get("tool") == "replace_lines":
+                lines.append(
+                    f"  • replace_lines {m.get('file')} lines {m.get('start_line')}-{m.get('end_line')} "
+                    f"ok={m.get('ok')} post_edit_valid={m.get('post_edit_valid')}"
+                )
+            elif m.get("tool") == "replace_exact":
+                lines.append(
+                    f"  • replace_exact on {m.get('file')} ({m.get('replacements')} hit(s)) ok={m.get('ok')}"
+                )
+            elif m.get("tool") == "append_template":
+                lines.append(f"  • append_template ok={m.get('ok')}")
+            else:
+                lines.append(f"  • {m}")
+            for issue in m.get("post_edit_issues") or []:
+                lines.append(f"    lint: {issue[:180]}")
+    else:
+        lines.append(
+            "- No mutation ledger on last assistant turn — prior response may have auto-finished "
+            "without replace_lines/replace_exact, or session state was not saved."
+        )
+
+    for gap in detect_likely_unmet_request(prior_user, workspace):
+        lines.append(f"- LIKELY STILL BROKEN: {gap}")
+
+    if correction:
+        lines.append(
+            "- FOLLOW-UP CORRECTION: User reports the last edit did NOT work. "
+            "Do NOT polish/layout the same element — implement the prior intent "
+            "(DELETE when they said remove). search_template → read_template_symbol → replace_lines."
+        )
+
+    return "\n".join(lines)
+
+
 def build_actionable_edit_hints(*texts: str) -> list[str]:
-    """Turn user/remaining prose into concrete search/replace starting points."""
-    blob = " ".join(t for t in texts if t).lower()
-    hints: list[str] = []
-    if any(k in blob for k in ("link", "href", "url", "hypertext", "anchor", "nav")):
+    """Pool-calling hints derived from user request (semantic section list, not search loops)."""
+    blob = " ".join(t for t in texts if t).strip()
+    if not blob:
+        return [
+            'list_template_symbols(file=html, kind=proposal_section, query="<topic>") → '
+            "read_template_symbol → replace_lines in one batch."
+        ]
+    q = blob[:120].replace('"', "'")
+    hints = [
+        f'list_template_symbols(file=html, kind=proposal_section, query="{q}") — semantic rank, then read top section.',
+        "read_template_symbol(symbol_id) + replace_lines(same line range) in the SAME tools response.",
+    ]
+    if any(k in blob.lower() for k in ("map", "floor", "venue", "floorplan")):
         hints.append(
-            'search_template(file="html", query="href=") then replace_exact on header/nav anchors '
-            '(use href="#section-id" for in-page targets).'
+            "Map: get_map_knowledge + get_map_reference_code once, then pool-edit .venue-map-proposal section."
         )
+    if any(k in blob.lower() for k in ("nav", "href", "link", "header")):
         hints.append(
-            'list_template_symbols(file="css", query="a") or query="header" then read_template_symbol → replace_lines.'
+            'Small nav fix: replace_exact on href inside the section you already read — not search_template first.'
         )
-    if any(k in blob for k in ("header", "top bar", "navbar", "navigation")):
-        hints.append(
-            'search_template(file="css", query="header") or query=".nav" — read_template_lines then '
-            "replace_lines/replace_exact for header background and link colors."
-        )
-    if any(k in blob for k in ("blue", "color", "css")):
-        hints.append(
-            "Inspect css for color on header/nav/a selectors; apply replace_exact rather than re-running overview."
-        )
-    if not hints:
-        hints.append(
-            "Batch: search_template → read_template_lines → replace_exact/replace_lines in ONE tools response."
-        )
-    return hints[:6]
+    return hints[:5]
 
 
 def build_readonly_loop_steer(
@@ -130,6 +300,12 @@ def shrink_tool_result_for_model(result: dict[str, Any]) -> dict[str, Any]:
     max_issues = _int("DESIGNER_TOOL_LOOP_MAX_ISSUES_IN_PAYLOAD", DEFAULT_MAX_ISSUES_IN_PAYLOAD)
     max_hits = _int("DESIGNER_TOOL_LOOP_MAX_HITS_IN_PAYLOAD", DEFAULT_MAX_HITS_IN_PAYLOAD)
     max_read = _int("DESIGNER_TOOL_LOOP_MAX_READ_CONTENT_CHARS", DEFAULT_MAX_READ_CONTENT_CHARS)
+    sym = out.get("symbol")
+    if isinstance(sym, dict) and sym.get("kind") == "proposal_section":
+        max_read = _int(
+            "DESIGNER_TOOL_LOOP_MAX_SECTION_READ_CHARS",
+            DEFAULT_MAX_SECTION_READ_CHARS,
+        )
     max_symbols = _int("DESIGNER_TOOL_LOOP_MAX_SYMBOLS_IN_PAYLOAD", DEFAULT_MAX_SYMBOLS_IN_PAYLOAD)
 
     symbols = out.get("symbols")
@@ -153,7 +329,7 @@ def shrink_tool_result_for_model(result: dict[str, Any]) -> dict[str, Any]:
         head = content[:max_read]
         if "\n" in head:
             head = head.rsplit("\n", 1)[0]
-        out["content"] = head + "\n… [truncated — call read_template_lines with a smaller line range]"
+        out["content"] = head + "\n… [truncated — use read_template_symbol on a smaller section or narrow line range]"
         out["content_truncated"] = True
         out["content_total_chars"] = len(content)
 
@@ -239,7 +415,73 @@ def _summarize_tool_pair(assistant_content: str, tool_content: str) -> str:
     return f"- {human_tool_label(tool_name)} ({ok})"
 
 
-def condense_tool_loop_messages(messages: list[dict[str, str]]) -> list[dict[str, str]]:
+def build_tool_trace_digest(tool_trace: list[dict[str, Any]], *, max_lines: int = 24) -> str:
+    """Human-readable tool history for checkpoint re-hydration (survives in-loop condensation)."""
+    lines: list[str] = []
+    for entry in (tool_trace or [])[-max_lines:]:
+        tool = str(entry.get("tool") or "tool")
+        result = entry.get("result") if isinstance(entry.get("result"), dict) else {}
+        summary = _trace_entry_summary(tool, result)
+        turn = entry.get("turn")
+        prefix = f"turn {turn}" if turn else "step"
+        args = entry.get("arguments") or {}
+        arg_hint = ""
+        if isinstance(args, dict) and args.get("query"):
+            arg_hint = f" query={args.get('query')!r}"
+        elif isinstance(args, dict) and args.get("start_line"):
+            arg_hint = f" lines {args.get('start_line')}-{args.get('end_line')}"
+        lines.append(f"- {prefix}: {tool}{arg_hint} — {summary}")
+    return "\n".join(lines)
+
+
+def build_executor_session_from_result(
+    result: dict[str, Any],
+    workspace: TemplateWorkspace,
+    *,
+    graph_thread_id: str = "",
+) -> dict[str, Any]:
+    from .tool_session_memory import workspace_fingerprint
+
+    trace = result.get("tool_trace") or []
+    return {
+        "tool_session_graph": result.get("tool_session_graph") or {},
+        "edit_ledger": result.get("edit_ledger") or {},
+        "tool_trace_digest": build_tool_trace_digest(trace),
+        "workspace_fp": workspace_fingerprint(workspace),
+        "graph_thread_id": graph_thread_id or result.get("checkpoint_thread_id") or "",
+    }
+
+
+def build_langgraph_checkpoint_context_block(
+    *,
+    graph_thread_id: str | None,
+    executor_session: dict[str, Any] | None,
+) -> str:
+    if not graph_thread_id and not executor_session:
+        return ""
+    lines = [
+        "LANGGRAPH CHECKPOINT (one thread per proposal template — industry durable session):",
+        f"- thread_id: {graph_thread_id or '(pending)'}",
+    ]
+    if executor_session:
+        digest = str(executor_session.get("tool_trace_digest") or "").strip()
+        if digest:
+            lines.append(
+                "- Prior tool steps (checkpointed — do not repeat read-only loops; "
+                "fix remaining intent from PRIOR TURN CONTEXT):"
+            )
+            lines.append(digest[:12000])
+        ledger = executor_session.get("edit_ledger")
+        if isinstance(ledger, dict) and ledger.get("mutations"):
+            lines.append(f"- Last turn mutations recorded: {ledger.get('mutation_count', 0)}")
+    return "\n".join(lines)
+
+
+def condense_tool_loop_messages(
+    messages: list[dict[str, str]],
+    *,
+    graph_thread_id: str | None = None,
+) -> list[dict[str, str]]:
     """
     Keep system + anchor user intro; condense older assistant/tool-result pairs into a summary.
     """
@@ -274,6 +516,11 @@ def condense_tool_loop_messages(messages: list[dict[str, str]]) -> list[dict[str
         return messages
 
     keep_recent = _int("DESIGNER_TOOL_LOOP_KEEP_RECENT_PAIRS", DEFAULT_KEEP_RECENT_PAIRS)
+    if graph_thread_id and getattr(settings, "DESIGNER_LANGGRAPH_THREAD_PER_TEMPLATE", True):
+        keep_recent = max(
+            keep_recent,
+            int(getattr(settings, "DESIGNER_TOOL_LOOP_CHECKPOINT_KEEP_RECENT_PAIRS", 14)),
+        )
     while keep_recent >= 2:
         old_pairs = pairs[: max(0, len(pairs) - keep_recent)]
         recent_pairs = pairs[max(0, len(pairs) - keep_recent) :]
@@ -335,6 +582,20 @@ def completed_work_summary(tool_trace: list[dict[str, Any]], max_items: int = 8)
     return [str(item.get("label") or "") for item in structured if item.get("label")]
 
 
+def resolve_combined_planner_brief(message: str, history: list[dict] | None) -> str:
+    """Planner + executor brief when user sends a short follow-up correction."""
+    current = (message or "").strip()
+    prior = prior_user_message_from_history(history)
+    if not prior or prior == current:
+        return current[:4000]
+    if user_follow_up_is_correction(current) or len(current) < 120:
+        return (
+            f"ORIGINAL REQUEST:\n{prior[:2500]}\n\n"
+            f"FOLLOW-UP (do this now — prior attempt failed or incomplete):\n{current[:800]}"
+        )[:4000]
+    return current[:4000]
+
+
 def resolve_original_user_request(message: str, history: list[dict[str, str]] | list[dict]) -> str:
     """When the user tapped Continue, recover the real design brief from chat history."""
     text = (message or "").strip()
@@ -365,8 +626,14 @@ def is_greenfield_template(workspace: TemplateWorkspace) -> bool:
     return len(present) == 0 and len(missing) >= 3
 
 
-def format_workspace_context_anchor(workspace: TemplateWorkspace, *, message: str = "") -> str:
+def format_workspace_context_anchor(
+    workspace: TemplateWorkspace,
+    *,
+    message: str = "",
+    repair_mode: bool = False,
+) -> str:
     """Stable snapshot so the model knows current template state without re-running overview."""
+    mode = resolve_agent_workflow_mode(workspace, message, repair_mode=repair_mode)
     report = workspace.placeholder_report()
     missing = report.get("missing") or []
     present = report.get("present") or []
@@ -386,12 +653,11 @@ def format_workspace_context_anchor(workspace: TemplateWorkspace, *, message: st
             lines.append(f"  • {issue}")
     else:
         lines.append("- deterministic validation: no blockers (server re-checks automatically after each edit).")
-    if is_greenfield_template(workspace):
+    lines.append(build_pool_calling_playbook(mode, message=message, workspace=workspace))
+    if mode == "greenfield_create":
         lines.append(
-            "- GREENFIELD (empty template): do NOT search/replace_exact on missing text. "
-            "First tool batches MUST append_template (html structure with all required {{placeholders}}), "
-            "append_template (css with modern layout + motion), append_template (js for interactivity). "
-            "Quality checks run automatically after edits — do not loop validate_template."
+            "- GREENFIELD detected: first response MUST mutate via append_template(file=html) — "
+            "no list/search/read prelude."
         )
     try:
         lines.append(compact_structure_outline(workspace, max_per_file=12))
@@ -413,9 +679,9 @@ def build_continuation_context_block(
     lines = [
         "CONTINUATION SESSION (user chose Continue after partial progress):",
         f"- Original request still in effect:\n{original[:2500]}",
-        "- You already have CURRENT TEMPLATE SNAPSHOT above — skip redundant get_template_overview.",
-        "- Use multi-tool batches to finish: list_template_symbols + read_template_symbol + replace_exact together.",
-        "- Do not repeat the same tool+arguments if the last batch reported ok with no file changes — change query or apply edits.",
+        "- Obey AGENT MODE + FOLLOW-UP STEPS in the snapshot — pool-calling only.",
+        "- Turn 1: list_template_symbols(proposal_section, query=remaining topic) → read → replace_lines.",
+        "- Do not repeat get_template_overview or the same list query after a successful read.",
     ]
     last_assistant = ""
     for turn in reversed(history or []):
@@ -453,26 +719,30 @@ def build_tool_loop_user_intro(
     history: list[dict[str, str]] | list[dict],
     context_prefix: str,
     workspace: TemplateWorkspace,
+    repair_mode: bool = False,
 ) -> str:
     original = resolve_original_user_request(message, history)
     continuation = user_wants_continuation(message)
+    mode = resolve_agent_workflow_mode(workspace, original, repair_mode=repair_mode)
     parts: list[str] = []
     if context_prefix.strip():
         parts.append(context_prefix.strip())
-    parts.append(format_workspace_context_anchor(workspace, message=original))
+    parts.append(format_workspace_context_anchor(workspace, message=original, repair_mode=repair_mode))
+    if message_has_map_intent(message) or "venue-map-proposal" in (workspace.html_markup or ""):
+        parts.append(
+            "MAP WORK: If the user wants a floorplan / interactive map, call get_map_knowledge(topic=checklist) "
+            "and get_map_reference_code(part=structure) once, then pool-edit the .venue-map-proposal section."
+        )
     if continuation:
         parts.append(build_continuation_context_block(workspace=workspace, history=history, message=message))
-        parts.append(
-            "Designer request (continuation):\n"
-            "Resume and complete the original request using targeted multi-tool batches.\n"
-            f"Original brief for reference:\n{original[:2000]}"
-        )
-    else:
-        parts.append(
-            f"Designer request:\n{original[:4000]}\n\n"
-            "Use tools to inspect and edit. Prefer multi-tool batches (search + read + replace) per turn. "
-            "Call get_template_overview only on the first turn if snapshot above is insufficient."
-        )
+    prior_block = build_prior_turn_session_block(
+        history=history,
+        workspace=workspace,
+        current_message=message,
+    )
+    if prior_block:
+        parts.append(prior_block)
+    parts.append(build_designer_request_footer(mode, continuation=continuation, original_request=original))
     return "\n\n".join(parts)
 
 
@@ -480,13 +750,15 @@ def truncate_history_turn_for_tool_loop(content: str, *, max_chars: int | None =
     """Keep chat history in the tool loop small (venue-map system blocks, long attachments)."""
     limit = max_chars or _int("DESIGNER_TOOL_LOOP_HISTORY_TURN_CHARS", 900)
     text = str(content or "")
+    if "[Attachments:" in text and "layout_reference" in text:
+        limit = max(limit, 1400)
     if len(text) <= limit:
         return text
-    if "SYSTEM DEFAULT VENUE MAP" in text or text.lstrip().startswith("SYSTEM "):
+    if "INTERACTIVE VENUE MAP" in text or text.lstrip().startswith("SYSTEM "):
         head = text[:420].rstrip()
         return (
-            f"{head}\n…[+{len(text) - 420} chars omitted — map data is in the current request snapshot; "
-            "do not re-read the full block; edit #mapSlot / selected_map_svg via tools.]"
+            f"{head}\n…[+{len(text) - 420} chars omitted — map knowledge is in the current request; "
+            "edit the map section inside html_markup via tools.]"
         )
     return text[:limit].rstrip() + f"\n…[+{len(text) - limit} chars truncated]"
 
@@ -499,19 +771,20 @@ def filter_redundant_validate_tools(
     validated_workspace_fp: str | None,
     workspace_fp: str,
 ) -> list[dict[str, Any]]:
-    """Drop extra validate_template calls — post-mutate gate + one explicit check per revision is enough."""
-    if repair_mode or not tool_batch:
+    """Drop duplicate validate_template calls in the same batch only (agent may validate anytime)."""
+    _ = repair_mode, batch_has_mutate, validated_workspace_fp, workspace_fp
+    if not tool_batch:
         return tool_batch
     out: list[dict[str, Any]] = []
+    kept_validate = False
     for spec in tool_batch:
         tool = str(spec.get("tool") or "").strip()
         if tool != "validate_template":
             out.append(spec)
             continue
-        if batch_has_mutate:
+        if kept_validate:
             continue
-        if validated_workspace_fp and validated_workspace_fp == workspace_fp:
-            continue
+        kept_validate = True
         out.append(spec)
     return out
 

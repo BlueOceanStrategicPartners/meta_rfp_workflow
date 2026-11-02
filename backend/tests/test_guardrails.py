@@ -28,3 +28,15 @@ def test_template_placeholder_lint():
 def test_xss_sanitization():
     with pytest.raises(TemplateValidationException):
         sanitize_template_html('<div onclick="evil()">x</div><script>alert(1)</script>')
+
+
+def test_single_file_tailwind_preserves_inline_scripts():
+    html = (
+        "<!DOCTYPE html><html><head>"
+        '<script src="https://cdn.tailwindcss.com"></script>'
+        "</head><body><div>{{client_name}}</div>"
+        "<script>console.log('ok')</script></body></html>"
+    )
+    out = sanitize_template_html(html, css="", js_script="")
+    assert "cdn.tailwindcss.com" in out
+    assert "console.log" in out

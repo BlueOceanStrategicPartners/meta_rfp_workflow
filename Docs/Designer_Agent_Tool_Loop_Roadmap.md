@@ -14,7 +14,7 @@
 | **Context truncation** | `context_budget.trim_template_fields` still applies to legacy mode only. |
 | **Slow, brittle edits** | Mitigated by `tool_loop` + scoped tools. |
 | **Repair loop doubles cost** | **Fixed:** `_repair_turn` uses `DesignerToolLoopRunner.run_repair` in tool mode. |
-| **No “grip” on structure** | **Fixed:** line read, search, replace tools. |
+| **No “grip” on structure** | **Fixed:** symbol index + hybrid `search_template` + `read_template_symbol`. |
 | **False progress UX** | **Fixed:** SSE `tool` events + sub-step list in `DesignerAgentProgress`. |
 
 ---
@@ -51,7 +51,7 @@ Frontend: html/css/js + work_plan + tool_trace + live tool steps
 |-----------|------------|------|---------------------|
 | **LangGraph `planner_agent`** | One-shot Muse plan → `PLAN_READY` → executor | Muse schema error → `PLAN_FALLBACK` (heuristic todos) | Empty plan → `plan_abort` node (`PLAN_FAILED`) |
 | **LangGraph `executor_agent`** | Tool loop finishes | Turn budget exhausted | `EXECUTOR_PARTIAL` / `EXECUTOR_FAILED` (`model_api_error`) |
-| **LangGraph checkpoints** | `thread_id=designer-{user}-{template}` persists plan slice after planner node | `DESIGNER_LANGGRAPH_CHECKPOINT_BACKEND=memory` in tests | Missing `thread_id` → LangGraph error; use `build_graph_thread_id` |
+| **LangGraph checkpoints** | One `thread_id` per template (`ProposalTemplate.langgraph_thread_id` or `designer-{user}-{template}`); SQLite checkpointer stores `executor_session` (tool trace digest, edit ledger) between turns; in-loop condense keeps more recent tool pairs when checkpoint thread is active (`DESIGNER_TOOL_LOOP_CHECKPOINT_KEEP_RECENT_PAIRS`, default 14) | `DESIGNER_LANGGRAPH_CHECKPOINT_BACKEND=memory` in tests; disable per-template threads with `DESIGNER_LANGGRAPH_THREAD_PER_TEMPLATE=false` | Missing `thread_id` → LangGraph error; use `resolve_template_langgraph_thread_id` |
 | `read_template_lines` | Returns numbered slice | Out-of-range → tool error JSON | Agent retries with overview |
 | `replace_exact` | 1..N replacements | 0 matches / ambiguous | Tool error; agent searches first |
 | `replace_lines` | Lines replaced | Invalid range | Tool error |

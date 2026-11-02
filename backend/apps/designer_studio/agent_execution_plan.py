@@ -113,16 +113,27 @@ def try_refine_execution_plan_with_llm(
     active_exec_id: str | None = None,
     system_prompt: str | None = None,
     client: MetaModelClient | None = None,
+    history: list[dict] | None = None,
 ) -> list[dict[str, Any]] | None:
     if not settings.USE_FIXTURE_DEBATE and not getattr(settings, "META_MODEL_API_KEY", ""):
         return None
     anchor = format_workspace_context_anchor(workspace, message=message)
     rules_bit = (context_prefix or "")[:4000]
+    from .tool_loop_context import build_prior_turn_session_block, resolve_combined_planner_brief
+
+    planner_brief = resolve_combined_planner_brief(message, history)
+    prior_block = build_prior_turn_session_block(
+        history=history,
+        workspace=workspace,
+        current_message=message,
+    )
     user_content = (
         f"Template snapshot:\n{anchor[:6000]}\n\n"
         f"Agent context (rules, attachments, audit):\n{rules_bit}\n\n"
-        f"Designer request:\n{(message or '')[:2500]}"
     )
+    if prior_block:
+        user_content += f"{prior_block}\n\n"
+    user_content += f"Designer request:\n{planner_brief[:2500]}"
     llm_client = client or MetaModelClient()
     prompt = system_prompt or EXECUTION_PLAN_SYSTEM
     try:

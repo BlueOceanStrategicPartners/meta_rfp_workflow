@@ -10,10 +10,13 @@ USER_TOOL_LABELS: dict[str, str] = {
     "read_template_symbol": "Open a section to review",
     "read_template_lines": "Review part of the proposal",
     "search_template": "Search the proposal",
+    "lint_template": "Lint the proposal",
     "replace_exact": "Apply a design change",
     "replace_lines": "Update a section",
     "append_template": "Add new content",
     "validate_template": "Run quality checks",
+    "get_map_knowledge": "Load interactive map guidelines",
+    "get_map_reference_code": "Load map demo code",
 }
 
 GRAPH_PHASE_LABELS: dict[str, str] = {
@@ -75,6 +78,14 @@ def format_user_tool_trace_summary(tool: str, result: dict[str, Any]) -> str:
         issues = result.get("issues") or []
         return f"{label} — {len(issues)} item{'s' if len(issues) != 1 else ''} still need attention."
 
+    if tool == "lint_template":
+        if result.get("valid"):
+            return f"{label} — no issues."
+        diags = result.get("diagnostics") or []
+        first = diags[0] if diags else {}
+        loc = f"{first.get('file', 'html')}:{first.get('line', '?')}" if first else "see diagnostics"
+        return f"{label} — {len(diags)} issue(s); first at {loc}."
+
     if tool == "get_template_overview":
         return f"{label} — ready to edit."
 
@@ -92,6 +103,14 @@ def format_user_tool_trace_summary(tool: str, result: dict[str, Any]) -> str:
 
     if tool == "append_template":
         return f"{label} — added."
+
+    if tool == "get_map_knowledge":
+        topic = str(result.get("topic") or "overview")
+        return f"{label} — {topic.replace('_', ' ')}."
+
+    if tool == "get_map_reference_code":
+        part = str(result.get("part") or "code")
+        return f"{label} — {part} excerpt loaded."
 
     return f"{label} — done."
 

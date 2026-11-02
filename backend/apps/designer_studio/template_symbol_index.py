@@ -7,17 +7,18 @@ read full symbol body only when editing.
 from __future__ import annotations
 
 import hashlib
-import hashlib
 import re
 from dataclasses import dataclass
 from typing import Any, Literal
 
 from .template_workspace import TemplateFile, TemplateWorkspace, normalize_template_file_arg
 
+from .agent_rules import hybrid_query_document_score
+
 _index_cache: dict[str, list["TemplateSymbol"]] = {}
 
-SymbolKind = Literal["css_rule", "html_element", "js_symbol"]
-KIND_FILTER = frozenset({"css_rule", "html_element", "js_symbol", "all"})
+SymbolKind = Literal["css_rule", "html_element", "js_symbol", "proposal_section"]
+KIND_FILTER = frozenset({"css_rule", "html_element", "js_symbol", "proposal_section", "all"})
 
 
 @dataclass(frozen=True)
@@ -137,6 +138,104 @@ def _extract_css_rules(css: str) -> list[TemplateSymbol]:
             rule_start = i + 1
         i += 1
     return symbols
+
+
+_SECTION_TAGS = ("section", "header", "footer", "main", "article")
+_OPEN_TAG = re.compile(
+    r"<(section|header|footer|main|article)(\s[^>]*)?>",
+    re.IGNORECASE,
+)
+
+
+def _section_label(tag: str, attrs: str, inner: str) -> str:
+    id_m = re.search(r'\bid\s*=\s*["\']([^"\']+)["\']', attrs, re.IGNORECASE)
+    if id_m:
+        return f"{tag}#{id_m.group(1)}"
+    aria_m = re.search(r'aria-label\s*=\s*["\']([^"\']+)["\']', attrs, re.IGNORECASE)
+    if aria_m:
+        return f"{tag}:{aria_m.group(1).strip()[:48]}"
+    class_m = re.search(r'\bclass\s*=\s*["\']([^"\']+)["\']', attrs, re.IGNORECASE)
+    if class_m:
+        tokens = [t for t in class_m.group(1).split() if t.strip()]
+        if tokens:
+            return f"{tag}.{tokens[0]}"
+    heading = re.search(r"<h[1-3][^>]*>([^<]{1,80})", inner, re.IGNORECASE)
+    if heading:
+        title = " ".join(heading.group(1).split())[:48]
+        if title:
+            return f"{tag}:{title}"
+    return f"<{tag}>"
+
+
+def _find_balanced_close(html: str, tag: str, open_end: int) -> int | None:
+    """Return index after closing tag, or None if unbalanced."""
+    tag_l = tag.lower()
+    open_re = re.compile(rf"<{tag_l}(\s[^>]*)?>", re.IGNORECASE)
+    close_re = re.compile(rf"</{tag_l}\s*>", re.IGNORECASE)
+    depth = 1
+    pos = open_end
+    n = len(html)
+    while depth > 0 and pos < n:
+        close_m = close_re.search(html, pos)
+        if not close_m:
+            return None
+        open_m = open_re.search(html, pos, close_m.start())
+        if open_m:
+            depth += 1
+            pos = open_m.end()
+            continue
+        depth -= 1
+        pos = close_m.end()
+        if depth == 0:
+            return pos
+    return None
+
+
+def _extract_proposal_sections(html: str) -> list[TemplateSymbol]:
+    """Top-level proposal blocks (section/header/main/footer/article) including inline Tailwind + script."""
+    symbols: list[TemplateSymbol] = []
+    if not html.strip():
+        return symbols
+    occupied: list[tuple[int, int]] = []
+
+    def overlaps(start: int, end: int) -> bool:
+        return any(not (end <= a or start >= b) for a, b in occupied)
+
+    for m in _OPEN_TAG.finditer(html):
+        start_idx = m.start()
+        if overlaps(start_idx, start_idx + 1):
+            continue
+        tag = m.group(1).lower()
+        attrs = m.group(2) or ""
+        close_end = _find_balanced_close(html, tag, m.end())
+        if close_end is None:
+            continue
+        end_idx = close_end
+        if overlaps(start_idx, end_idx):
+            continue
+        occupied.append((start_idx, end_idx))
+        start_line = _line_number_at(html, start_idx)
+        end_line = _line_number_at(html, end_idx)
+        inner = html[m.end() : close_end]
+        name = _section_label(tag, attrs, inner)
+        preview = html[start_idx : min(start_idx + 200, end_idx)].replace("\n", " ").strip()
+        sym_id = _stable_id("html", "proposal_section", name, start_line)
+        symbols.append(
+            TemplateSymbol(
+                id=sym_id,
+                kind="proposal_section",
+                name=name,
+                start_line=start_line,
+                end_line=end_line,
+                preview=preview,
+            )
+        )
+    symbols.sort(key=lambda s: s.start_line)
+    return symbols
+
+
+def _line_in_section_ranges(line_no: int, sections: list[TemplateSymbol]) -> bool:
+    return any(s.start_line <= line_no <= s.end_line for s in sections)
 
 
 def _extract_html_elements(html: str) -> list[TemplateSymbol]:
@@ -271,6 +370,243 @@ def clear_template_index_cache() -> None:
     _index_cache.clear()
 
 
+def _extract_inline_style_blocks(html: str) -> list[TemplateSymbol]:
+    """Tailwind single-file: embedded <style> blocks as css_rule symbols."""
+    symbols: list[TemplateSymbol] = []
+    for m in re.finditer(r"<style\b[^>]*>(.*?)</style>", html, re.IGNORECASE | re.DOTALL):
+        inner = m.group(1)
+        if not inner.strip():
+            continue
+        start_line = _line_number_at(html, m.start())
+        end_line = _line_number_at(html, m.end())
+        preview = inner.strip().replace("\n", " ")[:160]
+        name = f"inline-style@L{start_line}"
+        sym_id = _stable_id("html", "css_rule", name, start_line)
+        symbols.append(
+            TemplateSymbol(
+                id=sym_id,
+                kind="css_rule",
+                name=name,
+                start_line=start_line,
+                end_line=end_line,
+                preview=preview,
+            )
+        )
+    return symbols
+
+
+def _extract_inline_script_blocks(html: str) -> list[TemplateSymbol]:
+    """Non-JSON <script> blocks in single-file proposals."""
+    symbols: list[TemplateSymbol] = []
+    for m in re.finditer(r"<script\b([^>]*)>(.*?)</script>", html, re.IGNORECASE | re.DOTALL):
+        attrs = m.group(1) or ""
+        if re.search(r'type\s*=\s*["\']application/json["\']', attrs, re.IGNORECASE):
+            continue
+        inner = m.group(2)
+        if not inner.strip():
+            continue
+        start_line = _line_number_at(html, m.start())
+        end_line = _line_number_at(html, m.end())
+        preview = inner.strip().replace("\n", " ")[:160]
+        id_m = re.search(r'\bid\s*=\s*["\']([^"\']+)["\']', attrs, re.IGNORECASE)
+        name = f"script#{id_m.group(1)}" if id_m else f"inline-script@L{start_line}"
+        sym_id = _stable_id("html", "js_symbol", name, start_line)
+        symbols.append(
+            TemplateSymbol(
+                id=sym_id,
+                kind="js_symbol",
+                name=name,
+                start_line=start_line,
+                end_line=end_line,
+                preview=preview,
+            )
+        )
+    return symbols
+
+
+def _build_symbol_search_document(workspace: TemplateWorkspace, symbol: TemplateSymbol) -> str:
+    """Rich retrieval text: name, preview, placeholders, Tailwind classes, binding hooks."""
+    parts = [symbol.kind, symbol.name, symbol.preview]
+    try:
+        body = read_symbol_body(workspace, symbol)
+    except ValueError:
+        body = symbol.preview
+    if body:
+        placeholders = re.findall(r"\{\{[^}]+\}\}", body)
+        if placeholders:
+            parts.append(" ".join(dict.fromkeys(placeholders)))
+        for m in re.finditer(r'data-(?:proposal-[a-z-]+|proposal-bind)\s*=\s*["\']([^"\']+)["\']', body):
+            parts.append(f"data-bind:{m.group(1)}")
+        for m in re.finditer(r'\bclass\s*=\s*["\']([^"\']+)["\']', body[:6000]):
+            for cls in m.group(1).split()[:12]:
+                if cls.strip():
+                    parts.append(cls.strip())
+        if symbol.kind == "css_rule" and "{" in body:
+            sel = body.split("{", 1)[0].strip().replace("\n", " ")
+            if sel:
+                parts.append(sel[:240])
+    return " ".join(p for p in parts if p)
+
+
+def _legacy_line_search(
+    workspace: TemplateWorkspace,
+    file: TemplateFile,
+    query: str,
+    *,
+    use_regex: bool,
+    max_hits: int,
+) -> list[dict[str, Any]]:
+    text = workspace.get_file(file)
+    hits: list[dict[str, Any]] = []
+    for i, line in enumerate(text.splitlines(), start=1):
+        matched = False
+        if use_regex:
+            try:
+                matched = re.search(query, line) is not None
+            except re.error:
+                raise
+        else:
+            matched = query in line
+        if matched:
+            hits.append(
+                {
+                    "match_type": "line",
+                    "line": i,
+                    "text": line.strip()[:240],
+                }
+            )
+        if len(hits) >= max_hits:
+            break
+    return hits
+
+
+def execute_search_template(
+    workspace: TemplateWorkspace,
+    arguments: dict[str, Any],
+) -> dict[str, Any]:
+    """
+    Hybrid structure search (default): rank CSS rules, HTML sections/elements, JS symbols
+    via local semantic + keyword embeddings — then return symbol_id + line span for
+    read_template_symbol / replace_lines.
+
+    mode=line or regex=true falls back to capped line grep (syntax-level queries only).
+    """
+    raw_file = str(arguments.get("file") or "html").strip().lower()
+    query = str(arguments.get("query") or "").strip()
+    if not query:
+        return {"ok": False, "error": "query is required"}
+    use_regex = bool(arguments.get("regex"))
+    mode = str(arguments.get("mode") or "hybrid").strip().lower()
+    kind = str(arguments.get("kind") or "all").strip().lower()
+    if kind not in KIND_FILTER:
+        kind = "all"
+    max_hits = min(40, max(1, int(arguments.get("max_hits") or 12)))
+
+    if mode == "line" or use_regex:
+        try:
+            file = normalize_template_file_arg(raw_file)
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+        try:
+            line_hits = _legacy_line_search(
+                workspace, file, query, use_regex=use_regex, max_hits=max_hits
+            )
+        except re.error as exc:
+            return {"ok": False, "error": f"Invalid regex: {exc}"}
+        return {
+            "ok": True,
+            "mode": "line",
+            "file": file,
+            "query": query,
+            "hits": line_hits,
+            "total_shown": len(line_hits),
+            "context_note": (
+                "Line mode — prefer mode=hybrid (default) for sections/CSS/JS structure; "
+                "then read_template_symbol(symbol_id) instead of wide read_template_lines."
+            ),
+        }
+
+    search_files: list[TemplateFile]
+    if raw_file in ("all", "*", "any"):
+        search_files = ["html", "css", "js"]
+        file_label = "all"
+    else:
+        try:
+            search_files = [normalize_template_file_arg(raw_file)]
+            file_label = search_files[0]
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+
+    candidates: list[TemplateSymbol] = []
+    for f in search_files:
+        syms = index_template_file(workspace, f)
+        if kind != "all":
+            syms = [s for s in syms if s.kind == kind]
+        candidates.extend(syms)
+
+    if not candidates:
+        return {
+            "ok": True,
+            "mode": "hybrid",
+            "file": file_label,
+            "query": query,
+            "hits": [],
+            "total_shown": 0,
+            "context_note": "No indexed symbols — append content or use read_template_lines on small ranges.",
+        }
+
+    q_lower = query.lower()
+    scored: list[tuple[float, TemplateSymbol]] = []
+    for sym in candidates:
+        doc = _build_symbol_search_document(workspace, sym)
+        score = hybrid_query_document_score(query, doc)
+        if q_lower in doc.lower():
+            score = min(1.0, score + 0.12)
+        if sym.name.lower() == q_lower or q_lower in sym.name.lower():
+            score = min(1.0, score + 0.08)
+        scored.append((score, sym))
+    scored.sort(key=lambda x: x[0], reverse=True)
+
+    threshold = 0.035
+    picked = [s for score, s in scored if score >= threshold][:max_hits]
+    if not picked and scored:
+        picked = [scored[0][1]]
+
+    score_by_id = {sym.id: score for score, sym in scored}
+    hits: list[dict[str, Any]] = []
+    for sym in picked:
+        hits.append(
+            {
+                "match_type": "symbol",
+                "symbol_id": sym.id,
+                "kind": sym.kind,
+                "name": sym.name,
+                "file": sym.id.split(":", 1)[0],
+                "start_line": sym.start_line,
+                "end_line": sym.end_line,
+                "score": round(float(score_by_id.get(sym.id, 0.0)), 4),
+                "preview": sym.preview[:200],
+                "next_step": f'read_template_symbol(symbol_id="{sym.id}")',
+            }
+        )
+
+    return {
+        "ok": True,
+        "mode": "hybrid",
+        "file": file_label,
+        "query": query,
+        "kind": kind,
+        "hits": hits,
+        "total_shown": len(hits),
+        "total_indexed": len(candidates),
+        "context_note": (
+            "Hybrid structure search (semantic + keyword on HTML sections, Tailwind classes, "
+            "placeholders, CSS rules, inline script/style blocks). "
+            "Use read_template_symbol on symbol_id — full section in one read — then replace_lines."
+        ),
+    }
+
+
 def index_template_file(workspace: TemplateWorkspace, file: TemplateFile) -> list[TemplateSymbol]:
     key = _index_cache_key(workspace, file)
     cached = _index_cache.get(key)
@@ -280,7 +616,15 @@ def index_template_file(workspace: TemplateWorkspace, file: TemplateFile) -> lis
     if file == "css":
         symbols = _extract_css_rules(text)
     elif file == "html":
-        symbols = _extract_html_elements(text)
+        sections = _extract_proposal_sections(text)
+        elements = _extract_html_elements(text)
+        inline_css = _extract_inline_style_blocks(text)
+        inline_js = _extract_inline_script_blocks(text)
+        if sections:
+            filtered = [e for e in elements if not _line_in_section_ranges(e.start_line, sections)]
+            symbols = sections + filtered[:24] + inline_css[:6] + inline_js[:8]
+        else:
+            symbols = elements + inline_css[:6] + inline_js[:8]
     elif file == "js":
         symbols = _extract_js_symbols(text)
     else:
@@ -339,10 +683,26 @@ def read_symbol_body(workspace: TemplateWorkspace, symbol: TemplateSymbol) -> st
 
 
 def compact_structure_outline(workspace: TemplateWorkspace, *, max_per_file: int = 14) -> str:
-    """Token-budgeted repo-map style outline injected in the user anchor."""
-    lines = ["TEMPLATE STRUCTURE OUTLINE (use list_template_symbols / read_template_symbol — avoid blind line reads):"]
+    """Token-budgeted repo-map: proposal sections first, then css/js symbols."""
+    lines = [
+        "PROPOSAL SECTION POOL (each section = one HTML block with Tailwind classes + inline script):",
+        "Use list_template_symbols(file=html, kind=proposal_section) then read_template_symbol(symbol_id) → replace_lines.",
+    ]
+    html_syms = index_template_file(workspace, "html")
+    sections = [s for s in html_syms if s.kind == "proposal_section"]
+    if sections:
+        for s in sections[: max_per_file + 6]:
+            span = s.end_line - s.start_line + 1
+            lines.append(f"  • {s.id} — {s.name} (lines {s.start_line}-{s.end_line}, {span} lines)")
+        extra = len(sections) - min(len(sections), max_per_file + 6)
+        if extra > 0:
+            lines.append(f"  … +{extra} more sections (list_template_symbols kind=proposal_section)")
+    else:
+        lines.append("  (no <section>/<main> blocks yet — use append_template or greenfield scaffold)")
+    lines.append("")
+    lines.append("OTHER TEMPLATE SYMBOLS (css rules, js functions, small html anchors):")
     for file in ("css", "html", "js"):
-        syms = index_template_file(workspace, file)[:max_per_file]
+        syms = [s for s in index_template_file(workspace, file) if s.kind != "proposal_section"][:max_per_file]
         if not syms:
             continue
         labels = [f"{s.name} (L{s.start_line}-{s.end_line})" for s in syms]
@@ -369,14 +729,20 @@ def execute_list_template_symbols(
     syms = index_template_file(workspace, file)  # type: ignore[arg-type]
     if kind != "all":
         syms = [s for s in syms if s.kind == kind]
+    total_before_rank = len(syms)
     if query:
-        syms = [
-            s
-            for s in syms
-            if query in s.name.lower() or query in s.preview.lower()
-        ]
-    total = len(syms)
-    syms = syms[:max_items]
+        scored: list[tuple[float, TemplateSymbol]] = []
+        for s in syms:
+            doc = f"{s.name} {s.preview}"
+            scored.append((hybrid_query_document_score(query, doc), s))
+        scored.sort(key=lambda x: x[0], reverse=True)
+        syms = [s for score, s in scored if score > 0.04][:max_items]
+        if not syms and scored:
+            syms = [scored[0][1]]
+        total = total_before_rank
+    else:
+        total = len(syms)
+        syms = syms[:max_items]
     return {
         "ok": True,
         "file": file,
@@ -384,7 +750,12 @@ def execute_list_template_symbols(
         "symbols": [s.to_dict(include_lines=True) for s in syms],
         "total_matched": total,
         "shown": len(syms),
-        "context_note": "Pass symbol id to read_template_symbol for full body, then replace_lines or replace_exact.",
+        "context_note": (
+            "When `query` is set, results are ranked by hybrid semantic + keyword search "
+            "(same local embeddings as designer agent rules). "
+            "For proposal edits prefer kind=proposal_section — one read returns the full section "
+            "(HTML + Tailwind + inline JS). Then replace_lines on that line range."
+        ),
     }
 
 

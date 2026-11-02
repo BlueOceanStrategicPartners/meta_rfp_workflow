@@ -132,21 +132,6 @@ def _validate_asset_meta(raw: dict[str, Any], *, fixture_kind: str) -> dict[str,
     return raw
 
 
-def _validate_map_chat(raw: dict[str, Any], *, fixture_kind: str) -> dict[str, Any]:
-    _require_keys(
-        raw,
-        ("assistant_message", "html_markup", "css_stylesheet", "js_script", "locations"),
-        fixture_kind=fixture_kind,
-    )
-    if not isinstance(raw.get("locations"), list):
-        raise MuseStructuredValidationError(
-            "invalid_locations",
-            "locations must be an array",
-            fixture_kind=fixture_kind,
-        )
-    return raw
-
-
 def _validate_voice_reply(raw: dict[str, Any], *, fixture_kind: str) -> dict[str, Any]:
     reply = raw.get("reply") or raw.get("message")
     if not isinstance(reply, str) or not reply.strip():
@@ -215,8 +200,6 @@ FIXTURE_VALIDATORS: dict[str, Validator] = {
     ),
     "designer_rule_validate": lambda r: _validate_rule_conflict(r, fixture_kind="designer_rule_validate"),
     "designer_asset_meta": lambda r: _validate_asset_meta(r, fixture_kind="designer_asset_meta"),
-    "map_chat": lambda r: _validate_map_chat(r, fixture_kind="map_chat"),
-    "map_validate": lambda r: _validate_validation_result(r, fixture_kind="map_validate"),
     "voice_reply": lambda r: _validate_voice_reply(r, fixture_kind="voice_reply"),
     "rfp_extraction": lambda r: _validate_rfp_extraction(r, fixture_kind="rfp_extraction"),
     "rfp_critique": lambda r: _validate_rfp_critique(r, fixture_kind="rfp_critique"),
@@ -263,10 +246,6 @@ def infer_fixture_kind_from_prompt(
         return "rfp_critique"
     if '"reply"' in sp and "voice call" in sp:
         return "voice_reply"
-    if "interactive venue map architect" in sp:
-        return "map_chat"
-    if "validate compiled interactive hospitality venue" in sp:
-        return "map_validate"
     if "media for a hospitality proposal" in sp or "analyze media for a hospitality" in sp:
         return "designer_asset_meta"
     if "critic" in uc and "cross-examine" in uc:

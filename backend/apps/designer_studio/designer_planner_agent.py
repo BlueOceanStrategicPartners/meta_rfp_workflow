@@ -39,7 +39,8 @@ PLANNER_AGENT_SYSTEM = (
     "- ids must be exec_1, exec_2, ... sequentially.\n"
     "- Use the proposal snapshot and designer request; respect rules and attachments in context.\n"
     "- For empty proposals, first step must add structure before styling.\n"
-    "- Steps must reflect what the user asked (nav, branding, map, dates, etc.).\n"
+    "- For follow-ups ('still broken', 'still there'): steps must fix the ORIGINAL request, not re-layout the same element.\n"
+    "- If user said REMOVE/DELETE, steps must say remove/delete — not 'correct layout' or 'tidy spacing'.\n"
 )
 
 
@@ -66,6 +67,7 @@ class DesignerPlannerAgent:
         workspace: TemplateWorkspace,
         context_prefix: str = "",
         on_todo_event: TodoEventCallback | None = None,
+        history: list[dict] | None = None,
     ) -> PlannerAgentResult:
         """Single LLM call → agent todo list for SSE + executor."""
         if on_todo_event:
@@ -78,6 +80,7 @@ class DesignerPlannerAgent:
             active_exec_id=None,
             system_prompt=PLANNER_AGENT_SYSTEM,
             client=self.client,
+            history=history,
         )
         if llm_todos:
             summary = "Execution plan from planning agent"

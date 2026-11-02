@@ -39,8 +39,8 @@ def test_shrink_preserves_error_and_ok():
 def test_shrink_caps_hits_with_omitted_count():
     raw = {"ok": True, "hits": [{"line": i, "text": "a"} for i in range(40)]}
     out = shrink_tool_result_for_model(raw)
-    assert len(out["hits"]) <= 10
-    assert out.get("hits_omitted", 0) >= 30
+    assert len(out["hits"]) <= 12
+    assert out.get("hits_omitted", 0) >= 28
 
 
 def test_shrink_caps_issues_not_dropped_entirely():
@@ -59,7 +59,7 @@ def test_parse_tool_result_handles_truncated_legacy_gracefully():
 def test_condense_tool_loop_messages_collapses_old_pairs():
     messages = [{"role": "system", "content": "sys"}]
     messages.append({"role": "user", "content": "Designer request:\nfix nav"})
-    for i in range(10):
+    for i in range(12):
         messages.append({"role": "assistant", "content": f'{{"kind":"tool","tool":"search_template","step":{i}}}'})
         payload = trim_tool_result_payload({"ok": True, "hits": [{"line": 1, "text": "href="}]})
         messages.append({"role": "user", "content": "Tool result:\n" + payload})
@@ -83,7 +83,7 @@ def test_condense_matches_tool_results_batch_prefix():
     assert len(condensed) < len(messages)
 
 
-def test_filter_redundant_validate_drops_repeat_and_post_mutate():
+def test_filter_redundant_validate_drops_duplicate_in_same_batch_only():
     batch = [{"tool": "replace_exact", "arguments": {}}, {"tool": "validate_template", "arguments": {}}]
     out = filter_redundant_validate_tools(
         batch,
@@ -92,9 +92,9 @@ def test_filter_redundant_validate_drops_repeat_and_post_mutate():
         validated_workspace_fp=None,
         workspace_fp="abc",
     )
-    assert all(t["tool"] != "validate_template" for t in out)
+    assert any(t["tool"] == "validate_template" for t in out)
 
-    batch2 = [{"tool": "validate_template", "arguments": {}}]
+    batch2 = [{"tool": "validate_template", "arguments": {}}, {"tool": "validate_template", "arguments": {}}]
     out2 = filter_redundant_validate_tools(
         batch2,
         repair_mode=False,
@@ -102,11 +102,12 @@ def test_filter_redundant_validate_drops_repeat_and_post_mutate():
         validated_workspace_fp="abc",
         workspace_fp="abc",
     )
-    assert out2 == []
+    assert len(out2) == 1
+    assert out2[0]["tool"] == "validate_template"
 
 
-def test_truncate_history_shortens_venue_map_block():
-    long_map = "SYSTEM DEFAULT VENUE MAP (is_default=true):\n" + ("x" * 6000)
+def test_truncate_history_shortens_map_knowledge_block():
+    long_map = "INTERACTIVE VENUE MAP (part of the same proposal HTML document):\n" + ("x" * 6000)
     out = truncate_history_turn_for_tool_loop(long_map, max_chars=900)
     assert len(out) < len(long_map)
     assert "omitted" in out
@@ -138,5 +139,5 @@ def test_structured_completed_items_dedupes_repeated_validate():
     items = structured_completed_items(trace)
     labels = [i["label"] for i in items]
     assert len(items) == 2
-    assert sum("checks passed" in lb for lb in labels) == 1
-    assert any("2 change" in lb for lb in labels)
+    assert sum("everything looks good" in lb for lb in labels) == 1
+    assert any("2 update" in lb for lb in labels)

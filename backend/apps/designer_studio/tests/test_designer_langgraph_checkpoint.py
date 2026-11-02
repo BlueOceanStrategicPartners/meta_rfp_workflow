@@ -41,3 +41,7 @@ class DesignerLangGraphCheckpointTests(SimpleTestCase):
         state = graph.get_thread_state(thread)
         self.assertIsNotNone(state)
         self.assertTrue(state.get("execution_plan_todos") or state.get("result"))
+        session = state.get("executor_session")
+        if session:
+            self.assertIsInstance(session, dict)
+            self.assertIn("tool_trace_digest", session)

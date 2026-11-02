@@ -7,6 +7,10 @@ from django.conf import settings
 from django.utils import timezone
 
 from apps.core.exceptions import MaxDebateIterationsExceededError
+from apps.designer_studio.proposal_bindings import (
+    line_items_from_legacy_blocks,
+    resolve_verified_room_blocks_payload,
+)
 
 from .critic_agent import CriticAgent
 from .extractor_agent import ExtractorAgent
@@ -94,6 +98,22 @@ class ArbiterOrchestrator:
         def val(field):
             return field.value if field else None
 
+        overview = {
+            "check_in_date": val(extraction.check_in_date),
+            "check_out_date": val(extraction.check_out_date),
+        }
+        room_block_base = {
+            "blocks": [b.model_dump() for b in extraction.room_blocks],
+            "total_room_nights": val(extraction.total_room_nights),
+            "amber_fields": [f for f in amber if f == "total_room_nights"],
+        }
+        line_items = line_items_from_legacy_blocks(room_block_base, event_overview=overview)
+        if line_items:
+            room_block_base["line_items"] = line_items
+            payload = resolve_verified_room_blocks_payload(room_block_base, event_overview=overview)
+            if payload.get("summary"):
+                room_block_base["summary"] = payload["summary"]
+
         return {
             "event_overview": {
                 "company_name": val(extraction.company_name),
@@ -102,11 +122,7 @@ class ArbiterOrchestrator:
                 "check_out_date": val(extraction.check_out_date),
                 "amber_fields": [f for f in amber if f in {"check_in_date", "check_out_date"}],
             },
-            "room_block": {
-                "blocks": [b.model_dump() for b in extraction.room_blocks],
-                "total_room_nights": val(extraction.total_room_nights),
-                "amber_fields": [f for f in amber if f == "total_room_nights"],
-            },
+            "room_block": room_block_base,
             "meeting_space": {
                 "headcount": val(extraction.meeting_headcount),
                 "seating_style": val(extraction.seating_style),

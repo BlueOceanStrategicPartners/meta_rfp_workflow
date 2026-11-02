@@ -34,6 +34,9 @@ class DesignerExecutorAgent:
         on_tool_event: ToolEventCallback | None = None,
         on_todo_event: TodoEventCallback | None = None,
         on_preview_event: PreviewEventCallback | None = None,
+        user_id: int | str | None = None,
+        graph_thread_id: str | None = None,
+        executor_session_resumed: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         return self._runner.run_with_plan(
             message=message,
@@ -47,6 +50,9 @@ class DesignerExecutorAgent:
             on_tool_event=on_tool_event,
             on_todo_event=on_todo_event,
             on_preview_event=on_preview_event,
+            user_id=user_id,
+            graph_thread_id=graph_thread_id,
+            executor_session_resumed=executor_session_resumed,
         )
 
     def execute_repair(
@@ -61,6 +67,9 @@ class DesignerExecutorAgent:
         on_tool_event: ToolEventCallback | None = None,
         on_todo_event: TodoEventCallback | None = None,
         on_preview_event: PreviewEventCallback | None = None,
+        user_id: int | str | None = None,
+        graph_thread_id: str | None = None,
+        executor_session_resumed: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         return self._runner.run_repair(
             original_message=original_message,
@@ -72,6 +81,9 @@ class DesignerExecutorAgent:
             on_tool_event=on_tool_event,
             on_todo_event=on_todo_event,
             on_preview_event=on_preview_event,
+            user_id=user_id,
+            graph_thread_id=graph_thread_id,
+            executor_session_resumed=executor_session_resumed,
         )
 
     def execute_continuation(
@@ -87,6 +99,9 @@ class DesignerExecutorAgent:
         on_tool_event: ToolEventCallback | None = None,
         on_todo_event: TodoEventCallback | None = None,
         on_preview_event: PreviewEventCallback | None = None,
+        user_id: int | str | None = None,
+        graph_thread_id: str | None = None,
+        executor_session_resumed: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         return self._runner.run(
             message=message,
@@ -99,4 +114,7 @@ class DesignerExecutorAgent:
             on_tool_event=on_tool_event,
             on_todo_event=on_todo_event,
             on_preview_event=on_preview_event,
+            user_id=user_id,
+            graph_thread_id=graph_thread_id,
+            executor_session_resumed=executor_session_resumed,
         )

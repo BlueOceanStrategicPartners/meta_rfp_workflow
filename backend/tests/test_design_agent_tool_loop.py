@@ -3,12 +3,12 @@ from django.test import override_settings
 
 from apps.designer_studio.design_agent import DesignerStudioAgent, resolve_designer_agent_mode
 from apps.designer_studio.design_agent_tool_loop import DesignerToolLoopRunner
-from apps.designer_studio.models import REQUIRED_PLACEHOLDERS
+from apps.designer_studio.models import ALL_BINDING_PLACEHOLDERS
 from apps.designer_studio.template_repair_hints import format_repair_brief, repair_search_hints
 
 
 def _minimal_html(extra: str = "") -> str:
-    tokens = " ".join(REQUIRED_PLACEHOLDERS)
+    tokens = " ".join(ALL_BINDING_PLACEHOLDERS)
     return f"<main>{extra} {tokens}</main>"
 
 
@@ -21,7 +21,7 @@ def test_repair_hints_for_cta_issue():
 def test_format_repair_brief_lists_issues():
     text = format_repair_brief(original_message="fix nav", issues=["CTA not visible"])
     assert "CTA not visible" in text
-    assert "search_template" in text.lower() or "Suggested searches" in text
+    assert "list_template_symbols" in text or "Suggested lookups" in text
 
 
 @override_settings(DESIGNER_AGENT_MODE="full_document", DESIGNER_ALLOW_LEGACY_FULL_DOCUMENT=False)

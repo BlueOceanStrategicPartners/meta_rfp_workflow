@@ -1,0 +1,527 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Interactive Venue Map — Reference (Map Knowledge)</title>
+  <!--
+  MAP KNOWLEDGE — canonical pattern for Muse Map Architect / Designer map stage.
+  See MAP_AGENT_KNOWLEDGE.md in this folder for prompt DO/DON'T checklist.
+
+  MUST:
+  - Single root: div.venue-map-root#venue-map
+  - Floorplan img.map-floorplan with absolute URL (never empty .map-stage)
+  - Each button.map-marker: data-location-id + inline style top/left % (never style="")
+  - Each button.map-zone-row: same data-location-id as its marker
+  - #map-popup.map-popup.hidden on load; is-active ONLY toggled in JS when open
+  - JS: openLocation(id), closePopup(), mouseenter+click, postMessage to parent
+
+  AVOID:
+  - is-active in html_markup from the model
+  - Markers without data-location-id or without top/left positioning
+  - Full-viewport fixed overlay visible on load
+  - Proposal tokens ({{selected_map_svg}}) inside map fragment
+  - Inline onclick handlers
+  -->
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: system-ui, -apple-system, Segoe UI, sans-serif;
+      background: #0f172a;
+      padding: 1rem;
+      color: #0f172a;
+    }
+    .venue-map-root {
+      max-width: 960px;
+      margin: 0 auto;
+      color: #0f172a;
+    }
+    .map-header {
+      padding: 1rem 1.25rem;
+      background: #f8fafc;
+      border-radius: 16px;
+      margin-bottom: 0.75rem;
+    }
+    .map-eyebrow {
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      font-size: 0.75rem;
+      color: #b45309;
+      margin: 0;
+    }
+    .map-title {
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: 1.75rem;
+      margin: 0.35rem 0;
+    }
+    .map-lede { margin: 0; color: #475569; font-size: 0.95rem; }
+    .map-badge {
+      display: inline-block;
+      margin-top: 0.75rem;
+      padding: 0.35rem 0.75rem;
+      border-radius: 999px;
+      background: #14532d;
+      color: #ecfdf5;
+      font-size: 0.8rem;
+    }
+    .map-stage {
+      position: relative;
+      background: #111827;
+      border-radius: 16px;
+      overflow: hidden;
+      min-height: 360px;
+    }
+    .map-floorplan {
+      width: 100%;
+      height: auto;
+      display: block;
+      min-height: 320px;
+      object-fit: contain;
+    }
+    .map-markers {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+    }
+    .map-marker {
+      position: absolute;
+      transform: translate(-50%, -50%);
+      pointer-events: auto;
+      width: 2.5rem;
+      height: 2.5rem;
+      border-radius: 999px;
+      border: 2px solid #fbbf24;
+      background: rgba(15, 23, 42, 0.88);
+      color: #fef3c7;
+      font-weight: 700;
+      cursor: pointer;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+      padding: 0;
+    }
+    .map-marker span {
+      display: block;
+      line-height: 2.25rem;
+      text-align: center;
+    }
+    .map-marker:focus-visible,
+    .map-zone-row:focus-visible {
+      outline: 3px solid #38bdf8;
+      outline-offset: 2px;
+    }
+    .map-marker.is-active,
+    .map-zone-row.is-active {
+      outline: 3px solid #38bdf8;
+      outline-offset: 2px;
+      border-color: #38bdf8;
+    }
+    .map-popup {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: auto;
+      bottom: auto;
+      max-width: min(320px, 88%);
+      background: #fff;
+      padding: 1rem;
+      border-radius: 14px;
+      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.45);
+      z-index: 20;
+      max-height: min(420px, 70vh);
+      overflow: auto;
+      pointer-events: auto;
+    }
+    .map-popup.hidden { display: none !important; }
+    .map-popup h3 { margin: 0 0 0.35rem; font-size: 1.1rem; }
+    .map-popup .map-capacity {
+      font-style: italic;
+      color: #64748b;
+      margin: 0 0 0.5rem;
+      font-size: 0.85rem;
+    }
+    .map-popup img,
+    .map-popup video {
+      max-width: 100%;
+      border-radius: 10px;
+      margin-top: 0.5rem;
+      display: block;
+    }
+    .map-popup .map-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      margin-top: 0.75rem;
+    }
+    .map-action {
+      font-size: 0.85rem;
+      padding: 0.45rem 0.75rem;
+      border-radius: 999px;
+      border: 1px solid #cbd5e1;
+      background: #f1f5f9;
+      color: #0f172a;
+      text-decoration: none;
+      cursor: pointer;
+    }
+    .map-close {
+      margin-top: 0.5rem;
+      font-size: 0.8rem;
+      background: transparent;
+      border: 0;
+      color: #64748b;
+      cursor: pointer;
+    }
+    .map-zone-list {
+      list-style: none;
+      margin: 0.75rem 0 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+    .map-zone-row {
+      width: 100%;
+      text-align: left;
+      display: flex;
+      gap: 0.75rem;
+      padding: 0.85rem 1rem;
+      border: 0;
+      border-radius: 12px;
+      background: #fff;
+      box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+      cursor: pointer;
+    }
+    .map-zone-num { font-weight: 800; font-size: 1.1rem; min-width: 2rem; }
+    .map-zone-copy { display: flex; flex-direction: column; gap: 0.15rem; }
+    .map-zone-copy em { font-size: 0.85rem; color: #64748b; }
+    @media (max-width: 640px) {
+      .map-popup {
+        max-width: min(300px, 92%);
+        max-height: min(360px, 55vh);
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="venue-map-root" id="venue-map">
+    <header class="map-header">
+      <p class="map-eyebrow">Interactive resort map</p>
+      <h2 class="map-title">Explore the property at a glance</h2>
+      <p class="map-lede">
+        Select a numbered zone on the plan or from the list — hover (desktop) or tap to open the detail panel.
+      </p>
+      <p class="map-badge">7 zones • hover or tap to explore</p>
+    </header>
+
+    <div class="map-stage">
+      <img
+        class="map-floorplan"
+        src="http://127.0.0.1:8000/media/designer_assets/2026/11/237-2378697_hotel-map-floor-plan.png"
+        alt="Property floorplan"
+      />
+      <div class="map-markers" aria-label="Map zones">
+        <button type="button" class="map-marker" data-location-id="arrival-court" style="top:72%;left:28%" aria-label="Arrival Court and Lobby"><span>1</span></button>
+        <button type="button" class="map-marker" data-location-id="grand-ballroom" style="top:48%;left:52%" aria-label="Grand Ballroom"><span>2</span></button>
+        <button type="button" class="map-marker" data-location-id="conference-wing" style="top:42%;left:68%" aria-label="Conference Wing"><span>3</span></button>
+        <button type="button" class="map-marker" data-location-id="guest-towers" style="top:28%;left:32%" aria-label="Guest Room Towers"><span>4</span></button>
+        <button type="button" class="map-marker" data-location-id="pool-spa" style="top:24%;left:78%" aria-label="Pool and Spa"><span>5</span></button>
+        <button type="button" class="map-marker" data-location-id="gardens-lawn" style="top:68%;left:62%" aria-label="Gardens and Event Lawn"><span>6</span></button>
+        <button type="button" class="map-marker" data-location-id="lakeside-dining" style="top:55%;left:38%" aria-label="Lakeside Restaurant"><span>7</span></button>
+      </div>
+      <div id="map-popup" class="map-popup hidden" role="dialog" aria-hidden="true"></div>
+    </div>
+
+    <ol class="map-zone-list">
+      <li>
+        <button type="button" class="map-zone-row" data-location-id="arrival-court">
+          <span class="map-zone-num">1</span>
+          <span class="map-zone-copy">
+            <strong>Arrival Court &amp; Lobby</strong>
+            <em>Covered porte-cochere • 24-hr reception</em>
+            <span>Grand welcome point with planner desk and group check-in.</span>
+          </span>
+        </button>
+      </li>
+      <li>
+        <button type="button" class="map-zone-row" data-location-id="grand-ballroom">
+          <span class="map-zone-num">2</span>
+          <span class="map-zone-copy">
+            <strong>Grand Ballroom</strong>
+            <em>580 sqm • up to 600 theatre</em>
+            <span>Divisible by 3, dual projection, direct pre-function foyer.</span>
+          </span>
+        </button>
+      </li>
+      <li>
+        <button type="button" class="map-zone-row" data-location-id="conference-wing">
+          <span class="map-zone-num">3</span>
+          <span class="map-zone-copy">
+            <strong>Conference Wing</strong>
+            <em>8 rooms • 20–120 each</em>
+            <span>Daylight breakouts clustered for easy session flow.</span>
+          </span>
+        </button>
+      </li>
+      <li>
+        <button type="button" class="map-zone-row" data-location-id="guest-towers">
+          <span class="map-zone-num">4</span>
+          <span class="map-zone-copy">
+            <strong>Guest Room Towers</strong>
+            <em>320 keys • 2-min walk to events</em>
+            <span>Quiet room blocks steps from meeting spaces.</span>
+          </span>
+        </button>
+      </li>
+      <li>
+        <button type="button" class="map-zone-row" data-location-id="pool-spa">
+          <span class="map-zone-num">5</span>
+          <span class="map-zone-copy">
+            <strong>Pool &amp; Spa Retreat</strong>
+            <em>80 guests buyout • 6 treatment rooms</em>
+            <span>Incentive amenity for downtime and VIP hosting.</span>
+          </span>
+        </button>
+      </li>
+      <li>
+        <button type="button" class="map-zone-row" data-location-id="gardens-lawn">
+          <span class="map-zone-num">6</span>
+          <span class="map-zone-copy">
+            <strong>Gardens &amp; Event Lawn</strong>
+            <em>1,200 sqm • up to 500 reception</em>
+            <span>Open-air ceremonies, team-builds and gala spill-out.</span>
+          </span>
+        </button>
+      </li>
+      <li>
+        <button type="button" class="map-zone-row" data-location-id="lakeside-dining">
+          <span class="map-zone-num">7</span>
+          <span class="map-zone-copy">
+            <strong>Lakeside Restaurant &amp; Terrace</strong>
+            <em>180 seated • 250 cocktail</em>
+            <span>Private dining with terrace overlooking water.</span>
+          </span>
+        </button>
+      </li>
+    </ol>
+  </div>
+
+  <script>
+    (function () {
+      var LOCS = {
+        "arrival-court": {
+          label: "Arrival Court & Lobby",
+          capacity: "Covered porte-cochere • 24-hr reception",
+          description: "Grand welcome point with planner desk and group check-in.",
+          imageUrls: ["https://placehold.co/640x360/png?text=Arrival"],
+          videoUrls: [],
+          actions: [{ label: "Request site visit", action: "site-visit" }],
+        },
+        "grand-ballroom": {
+          label: "Grand Ballroom",
+          capacity: "580 sqm • up to 600 theatre",
+          description: "Divisible by 3, dual projection, direct pre-function foyer.",
+          imageUrls: ["https://placehold.co/640x360/png?text=Ballroom"],
+          videoUrls: [],
+          actions: [{ label: "Request hold", action: "request-hold" }],
+        },
+        "conference-wing": {
+          label: "Conference Wing",
+          capacity: "8 rooms • 20–120 each",
+          description: "Daylight breakouts clustered for easy session flow.",
+          imageUrls: ["https://placehold.co/640x360/png?text=Breakouts"],
+          videoUrls: [],
+          actions: [{ label: "View capacities", href: "#capacities" }],
+        },
+        "guest-towers": {
+          label: "Guest Room Towers",
+          capacity: "320 keys • 2-min walk to events",
+          description: "Quiet room blocks steps from meeting spaces.",
+          imageUrls: ["https://placehold.co/640x360/png?text=Guest+towers"],
+          videoUrls: [],
+          actions: [],
+        },
+        "pool-spa": {
+          label: "Pool & Spa Retreat",
+          capacity: "80 guests buyout • 6 treatment rooms",
+          description: "Incentive amenity for downtime and VIP hosting.",
+          imageUrls: ["https://placehold.co/640x360/png?text=Pool"],
+          videoUrls: ["https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4"],
+          actions: [{ label: "Spa menu", href: "#spa" }],
+        },
+        "gardens-lawn": {
+          label: "Gardens & Event Lawn",
+          capacity: "1,200 sqm • up to 500 reception",
+          description: "Open-air ceremonies, team-builds and gala spill-out.",
+          imageUrls: ["https://placehold.co/640x360/png?text=Gardens"],
+          videoUrls: [],
+          actions: [],
+        },
+        "lakeside-dining": {
+          label: "Lakeside Restaurant & Terrace",
+          capacity: "180 seated • 250 cocktail",
+          description: "Private dining with terrace overlooking water.",
+          imageUrls: ["https://placehold.co/640x360/png?text=Dining"],
+          videoUrls: [],
+          actions: [{ label: "Sample menu", href: "#menu" }],
+        },
+      };
+
+      function esc(s) {
+        return String(s || "")
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/"/g, "&quot;");
+      }
+
+      function mediaHtml(d) {
+        var h = (d.imageUrls || [])
+          .map(function (u) {
+            return '<img src="' + esc(u) + '" alt="" />';
+          })
+          .join("");
+        h += (d.videoUrls || [])
+          .map(function (u) {
+            return '<video controls playsinline src="' + esc(u) + '"></video>';
+          })
+          .join("");
+        return h;
+      }
+
+      function actionsHtml(d) {
+        var acts = d.actions || [];
+        if (!acts.length) return "";
+        return (
+          '<div class="map-actions">' +
+          acts
+            .map(function (a) {
+              if (a.href)
+                return (
+                  '<a class="map-action" href="' +
+                  esc(a.href) +
+                  '">' +
+                  esc(a.label) +
+                  "</a>"
+                );
+              return (
+                '<button type="button" class="map-action" data-action="' +
+                esc(a.action || "") +
+                '">' +
+                esc(a.label) +
+                "</button>"
+              );
+            })
+            .join("") +
+          "</div>"
+        );
+      }
+
+      function setActive(id) {
+        document.querySelectorAll(".map-marker, .map-zone-row").forEach(function (el) {
+          el.classList.toggle(
+            "is-active",
+            el.getAttribute("data-location-id") === id
+          );
+        });
+      }
+
+      function positionPopupNearMarker(locationId) {
+        var stage = document.querySelector(".map-stage");
+        var popup = document.getElementById("map-popup");
+        if (!stage || !popup) return;
+        var marker = stage.querySelector(
+          '.map-marker[data-location-id="' + locationId + '"]'
+        );
+        var pad = 8;
+        var gap = 14;
+        if (!marker) {
+          popup.style.left = pad + "px";
+          popup.style.top = pad + "px";
+          return;
+        }
+        var sw = stage.clientWidth;
+        var sh = stage.clientHeight;
+        var mr = marker.getBoundingClientRect();
+        var sr = stage.getBoundingClientRect();
+        var cx = mr.left - sr.left + mr.width / 2;
+        var cy = mr.top - sr.top + mr.height / 2;
+        var pw = popup.offsetWidth || 280;
+        var ph = popup.offsetHeight || 120;
+        var left = cx + gap;
+        var top = cy - ph / 2;
+        if (left + pw > sw - pad) left = cx - pw - gap;
+        if (left < pad) left = pad;
+        if (top + ph > sh - pad) top = sh - ph - pad;
+        if (top < pad) top = pad;
+        popup.style.left = Math.round(left) + "px";
+        popup.style.top = Math.round(top) + "px";
+        popup.style.right = "auto";
+        popup.style.bottom = "auto";
+      }
+
+      function closePopup() {
+        var p = document.getElementById("map-popup");
+        if (!p) return;
+        p.classList.add("hidden");
+        p.setAttribute("aria-hidden", "true");
+        setActive("");
+      }
+
+      function openLocation(id) {
+        var d = LOCS[id];
+        if (!d) return;
+        var p = document.getElementById("map-popup");
+        if (!p) return;
+        p.innerHTML =
+          "<h3>" +
+          esc(d.label) +
+          '</h3><p class="map-capacity">' +
+          esc(d.capacity || "") +
+          "</p><p>" +
+          esc(d.description) +
+          "</p>" +
+          mediaHtml(d) +
+          actionsHtml(d) +
+          '<button type="button" class="map-close">Close</button>';
+        p.classList.remove("hidden");
+        p.setAttribute("aria-hidden", "false");
+        setActive(id);
+        requestAnimationFrame(function () {
+          positionPopupNearMarker(id);
+        });
+        p.querySelector(".map-close").addEventListener("click", closePopup);
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage(
+            {
+              type: "venue-map-select",
+              locationId: id,
+              label: d.label,
+              description: d.description,
+              imageUrls: d.imageUrls || [],
+              videoUrls: d.videoUrls || [],
+            },
+            "*"
+          );
+        }
+      }
+
+      document.querySelectorAll(".map-marker, .map-zone-row").forEach(function (el) {
+        var id = el.getAttribute("data-location-id");
+        if (!id) return;
+        el.addEventListener("click", function () {
+          openLocation(id);
+        });
+        el.addEventListener("mouseenter", function () {
+          openLocation(id);
+        });
+        el.addEventListener("focus", function () {
+          openLocation(id);
+        });
+      });
+
+      document.addEventListener("keydown", function (e) {
+        if (e.key === "Escape") closePopup();
+      });
+    })();
+  </script>
+</body>
+</html>

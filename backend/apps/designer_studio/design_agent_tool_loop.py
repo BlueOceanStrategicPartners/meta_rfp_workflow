@@ -22,13 +22,22 @@ from .agent_task_plan import (
     build_continuation_agent_todos,
     tool_mutated_template,
 )
+from .designer_live_progress import (
+    build_agent_cancelled_result,
+    is_designer_agent_cancel_requested,
+)
 from .designer_user_labels import (
     format_user_tool_trace_summary,
     sanitize_user_visible_label,
     user_model_error_label,
     user_model_turn_label,
 )
-from .designer_validation import validate_template_deterministic_gate
+from .template_lint import format_diagnostics_control_block, lint_template_workspace, run_post_edit_validation
+from .finalize_validation import (
+    format_finalize_reject_message,
+    run_systematic_finalize_validation,
+)
+from .placeholder_guidance import tool_loop_placeholder_guidance
 from .template_agent_tools import execute_template_tool, human_tool_label, tool_catalog_for_prompt
 from .template_repair_hints import format_repair_brief
 from .template_workspace import TemplateWorkspace
@@ -39,7 +48,10 @@ from .tool_session_memory import (
     workspace_fingerprint,
 )
 from .tool_loop_context import (
+    build_edit_ledger_from_tool_trace,
     build_exhaustion_user_message,
+    build_langgraph_checkpoint_context_block,
+    build_executor_session_from_result,
     build_readonly_loop_steer,
     build_tool_loop_user_intro,
     condense_tool_loop_messages,
@@ -65,46 +77,60 @@ PreviewEventCallback = Callable[[dict[str, str]], None]
 
 TOOL_LOOP_SYSTEM = (
     "You are the Proposal Template Editor for a hospitality RFP designer panel. "
-    "The template is THREE files: html (body markup with {{binding tokens}}), css, js.\n\n"
+    "Templates use ONE self-contained HTML file with Tailwind CSS (utility classes) and "
+    "<script> blocks inside that file — not separate css/js files.\n\n"
+    "AGENT MODES (obey AGENT MODE + FOLLOW-UP STEPS in each user message):\n"
+    "• GREENFIELD CREATE — Turn 1: append_template(html) only. No overview/list/search prelude.\n"
+    "• UPDATE EXISTING — pool: list_template_symbols(proposal_section, query=topic) → read_template_symbol → "
+    "replace_lines in one batch.\n"
+    "• FIX VALIDATION — validate_template(scope=systematic) for errors + pool_repair_hints; "
+    "then list_template_symbols → read_template_symbol → replace_lines.\n\n"
+    "VALIDATE TOOL:\n"
+    "- Call validate_template anytime (user reports errors, triage blockers, or before finish).\n"
+    "- Response includes issues by category and pool_repair_hints with line ranges for replace_lines.\n"
+    "- Mutating tools trigger automatic post-edit lint (file:line diagnostics). "
+    "Fix all errors before the execution plan advances to the next todo.\n"
+    "- Optional: lint_template() — same checks on demand without mutating.\n"
+    "- finish runs systematic finalize validation; rejected finish returns the same pool repair brief.\n\n"
+    "POOL-CALLING (avoid unnecessary tools):\n"
+    "- Use PROPOSAL SECTION POOL + list_template_symbols(query=…) or search_template(query=…) "
+    "(hybrid structure rank → symbol_id).\n"
+    "- Skip get_template_overview when snapshot + pool are present.\n"
+    "- Skip wide read_template_lines for whole sections; use read_template_symbol.\n"
+    "- Do not repeat list_template_symbols with the same query after a successful read.\n"
+    "- Do not batch two validate_template calls in one turn.\n\n"
     "RULES:\n"
     "- Make changes ONLY via tools. Do not paste full file bodies in finish.\n"
-    "- Required placeholders in html must appear exactly once each — never delete them.\n"
-    "- Prefer list_template_symbols → read_template_symbol → replace_lines/replace_exact (AST-style, smallest context).\n"
-    "- Tool argument `file` is always html, css, or js (never html_markup, css_stylesheet, js_script).\n"
-    "- After search/list/read confirms what to change, batch replace_exact/replace_lines in the SAME turn — "
-    "do not repeat list_template_symbols or read_template_lines on the next turn unless a patch failed.\n"
-    "- For empty templates, use append_template to scaffold html/css/js before search or replace.\n"
-    "- Call validate_template at most once before finish if you changed files — the server re-runs "
-    "deterministic quality checks automatically after every edit.\n"
-    "- Put interactivity in js; no inline onclick in html.\n"
-    "- For nav links to on-page sections use href=\"#section-id\" not fake external URLs.\n\n"
-    "MULTI-TOOL TURNS (important):\n"
-    "- Each model turn may include MANY tools. Batch inspection and edits in one response.\n"
-    "- There is NO limit on how many tools run inside one turn.\n"
-    "- Do NOT repeat the same tool+arguments if the last batch returned ok without changing files.\n\n"
-    "CONTEXT (important):\n"
-    "- Each user message includes CURRENT TEMPLATE SNAPSHOT (line counts, placeholders, validation blockers).\n"
-    "- Trust the snapshot; skip get_template_overview on continuation turns unless you are lost after edits.\n"
-    "- On Continue sessions, finish the ORIGINAL request using remaining items — not another empty overview loop.\n"
-    "- TOOL SESSION MEMORY messages list edits and completed investigations — obey DONE/skip lines.\n"
-    "- When an EXECUTION PLAN block is present, work step-by-step: tools should advance the ACTIVE plan step.\n\n"
-    "FAST EDIT PATH (three files only — html, css, js):\n"
-    "- CURRENT TEMPLATE SNAPSHOT includes EDIT TARGET HINTS with symbol ids — start there.\n"
-    "- Batch read_template_symbol + replace_exact/replace_lines in ONE turn when possible.\n"
-    "- After ANY read-only batch, the next batch MUST include a mutating tool in the same response.\n"
-    "- Do not call get_template_overview if the snapshot lists placeholders and structure.\n\n"
+    "- Edit file=html only; leave css/js empty.\n"
+    "- Maps: get_map_knowledge + get_map_reference_code once, then edit .venue-map-proposal via pool.\n"
+    "- Tailwind utilities; bottom <script>; nav href=\"#section-id\".\n\n"
+    + tool_loop_placeholder_guidance()
+    + "\n\nNAVIGATION (critical in Designer live preview):\n"
+    "- All in-proposal buttons/links scroll to sections: href=\"#hero\", href=\"#rooms\", href=\"#venue-map-section\", "
+    "href=\"#accept\" — each target id must exist on a <section id=\"…\">.\n"
+    "- NEVER href=\"/rooms\", href=\"/designer\", href=\"/client\", or other /app paths — they load the RFP Engine "
+    "SPA inside/outside the preview instead of moving within the proposal.\n"
+    "- External sites only as full https:// URLs (images, optional outbound links).\n"
+    "- Guest-visible labels (nav, badges, map hints): use real UTF-8 characters or HTML entities "
+    "(e.g. • or &#8226;). NEVER paste Python/JSON escape sequences like \\u2022 or \\U2022 in HTML text — "
+    "they render as literal garbage (\"\\U2022\" on screen).\n"
+    "- Files with role=layout_reference (pasted screenshots) are bug references — never embed as <img> or card art.\n\n"
+    "MULTI-TOOL TURNS:\n"
+    "- Batch read + mutate in one response. Never repeat tool+args if last batch ok with no file change.\n"
+    "- TOOL SESSION MEMORY + EXECUTION PLAN: advance active step; obey DONE lines.\n\n"
     "RESPONSE JSON (one object per model turn):\n"
     '- Multi-tool batch (preferred): {"kind":"tools","tools":[{"tool":"<name>","arguments":{...}}, ...]}\n'
     '- Single tool (legacy): {"kind":"tool","tool":"<name>","arguments":{...}}\n'
-    '- Done: {"kind":"finish","assistant_message":"...","clarification_options":["optional short replies"]}\n\n'
+    '- Done: {"kind":"finish","assistant_message":"...","clarification_options":[]}\n\n'
     "TOOLS:\n"
     f"{tool_catalog_for_prompt()}"
 )
 
 REPAIR_TOOL_LOOP_SYSTEM = (
     "You are the Proposal Template Repair Editor. "
-    "Fix ONLY the validation issues provided — use tools for every change.\n\n"
-    + TOOL_LOOP_SYSTEM.split("RULES:\n", 1)[1]
+    "Fix ONLY the validation issues provided — obey AGENT MODE FIX VALIDATION in the user message.\n\n"
+    + "POOL-CALLING"
+    + TOOL_LOOP_SYSTEM.split("POOL-CALLING", 1)[1]
 )
 
 
@@ -347,6 +373,9 @@ class DesignerToolLoopRunner:
         on_tool_event: ToolEventCallback | None = None,
         on_todo_event: TodoEventCallback | None = None,
         on_preview_event: PreviewEventCallback | None = None,
+        user_id: int | str | None = None,
+        graph_thread_id: str | None = None,
+        executor_session_resumed: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         _tick(on_work_step, "understand_brief", "done")
         _tick(on_work_step, "draft_proposal", "active")
@@ -369,6 +398,9 @@ class DesignerToolLoopRunner:
             on_todo_event=on_todo_event,
             on_preview_event=on_preview_event,
             phase="edit",
+            user_id=user_id,
+            graph_thread_id=graph_thread_id,
+            executor_session_resumed=executor_session_resumed,
         )
         _tick(on_work_step, "draft_proposal", "done")
         out["agent_mode"] = "tool_loop"
@@ -388,6 +420,9 @@ class DesignerToolLoopRunner:
         on_tool_event: ToolEventCallback | None = None,
         on_todo_event: TodoEventCallback | None = None,
         on_preview_event: PreviewEventCallback | None = None,
+        user_id: int | str | None = None,
+        graph_thread_id: str | None = None,
+        executor_session_resumed: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Executor entry: plan was produced by the planning agent; do not replan."""
         _tick(on_work_step, "understand_brief", "done")
@@ -412,6 +447,9 @@ class DesignerToolLoopRunner:
             on_todo_event=on_todo_event,
             on_preview_event=on_preview_event,
             phase="edit",
+            user_id=user_id,
+            graph_thread_id=graph_thread_id,
+            executor_session_resumed=executor_session_resumed,
         )
         _tick(on_work_step, "draft_proposal", "done")
         out["agent_mode"] = "langgraph_executor"
@@ -429,8 +467,20 @@ class DesignerToolLoopRunner:
         on_tool_event: ToolEventCallback | None = None,
         on_todo_event: TodoEventCallback | None = None,
         on_preview_event: PreviewEventCallback | None = None,
+        user_id: int | str | None = None,
+        graph_thread_id: str | None = None,
+        executor_session_resumed: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        brief = format_repair_brief(original_message=original_message, issues=issues)
+        repair_workspace = TemplateWorkspace(
+            html_markup=html_markup,
+            css_stylesheet=css_stylesheet,
+            js_script=js_script,
+        )
+        brief = format_repair_brief(
+            original_message=original_message,
+            issues=issues,
+            workspace=repair_workspace,
+        )
         max_turns = max(4, int(getattr(settings, "DESIGNER_TOOL_LOOP_REPAIR_MAX_TURNS", 20)))
         out = self._loop(
             system_prompt=REPAIR_TOOL_LOOP_SYSTEM,
@@ -448,6 +498,7 @@ class DesignerToolLoopRunner:
             on_todo_event=on_todo_event,
             on_preview_event=on_preview_event,
             phase="repair",
+            user_id=user_id,
         )
         out["agent_mode"] = "tool_loop"
         out["repair_tool_pass"] = True
@@ -472,6 +523,9 @@ class DesignerToolLoopRunner:
         phase: str,
         user_request: str = "",
         execution_plan_todos: list[dict[str, Any]] | None = None,
+        user_id: int | str | None = None,
+        graph_thread_id: str | None = None,
+        executor_session_resumed: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         workspace = TemplateWorkspace(
             html_markup=html_markup or "",
@@ -497,6 +551,11 @@ class DesignerToolLoopRunner:
             todo_tracker = AgentTodoTracker([])
             execution_plan_block = ""
         session_memory = ToolSessionMemory.from_action_state(history)
+        if executor_session_resumed and isinstance(executor_session_resumed, dict):
+            ck_graph = executor_session_resumed.get("tool_session_graph")
+            if isinstance(ck_graph, dict) and ck_graph.get("entries"):
+                if ck_graph.get("workspace_fp") == workspace_fingerprint(workspace):
+                    session_memory = ToolSessionMemory.from_dict(ck_graph)
         if continuation_active:
             session_memory.prepare_continuation(workspace)
         else:
@@ -516,7 +575,9 @@ class DesignerToolLoopRunner:
                 )
         if repair_mode:
             user_block = (context_prefix or "").strip()
-            user_block += "\n\n" + format_workspace_context_anchor(workspace, message=user_request)
+            user_block += "\n\n" + format_workspace_context_anchor(
+                workspace, message=user_request, repair_mode=True
+            )
             messages.append({"role": "user", "content": user_block[:32000]})
         else:
             user_block = build_tool_loop_user_intro(
@@ -527,6 +588,12 @@ class DesignerToolLoopRunner:
             )
             if execution_plan_block:
                 user_block = f"{user_block}\n\n{execution_plan_block}"
+            ck_block = build_langgraph_checkpoint_context_block(
+                graph_thread_id=graph_thread_id,
+                executor_session=executor_session_resumed,
+            )
+            if ck_block:
+                user_block = f"{user_block}\n\n{ck_block}"
             messages.append({"role": "user", "content": user_block[:32000]})
 
         last_tool_result: dict[str, Any] | None = None
@@ -548,6 +615,11 @@ class DesignerToolLoopRunner:
         last_batch_gate_valid = True
         last_batch_had_mutate = False
         model_api_failed = False
+        finalize_reject_count = 0
+        last_finalize_review: dict[str, Any] | None = None
+        finalize_reject_max = max(
+            1, int(getattr(settings, "DESIGNER_FINALIZE_REJECT_MAX", 3))
+        )
         prior_action = last_assistant_action_state(history) or {}
         continuation_remaining = list(prior_action.get("remaining_items") or [])[:8]
 
@@ -556,7 +628,74 @@ class DesignerToolLoopRunner:
                 return
             _emit_todos(on_todo_event, todo_tracker)
 
+        def cancelled_result() -> dict[str, Any]:
+            out = build_agent_cancelled_result(
+                html_markup=workspace.html_markup,
+                css_stylesheet=workspace.css_stylesheet,
+                js_script=workspace.js_script,
+            )
+            out["agent_todos"] = todo_tracker.snapshot()
+            out["tool_trace"] = tool_trace[:60]
+            out["tool_session_graph"] = session_memory.to_dict()
+            return out
+
+        def finalize_gate_allows_finish(
+            *,
+            source: str,
+            assistant_raw: dict[str, Any] | None = None,
+        ) -> bool:
+            """Run systematic finalize validation; reject finish with pool repair brief when invalid."""
+            nonlocal finalize_reject_count, last_finalize_review
+            if not getattr(settings, "DESIGNER_FINALIZE_VALIDATION_ENABLED", True):
+                return True
+            review = run_systematic_finalize_validation(
+                workspace=workspace,
+                message=effective_request,
+                history=history,
+            )
+            last_finalize_review = review
+            if review.get("valid"):
+                if todo_tracker.has("finalize"):
+                    todo_tracker.set_status("finalize", "active")
+                return True
+            finalize_reject_count += 1
+            _emit_tool(
+                on_tool_event,
+                tool="finalize_validator",
+                ok=False,
+                phase=phase,
+                label=f"Finalize blocked ({len(review.get('issues') or [])} issues)",
+            )
+            if todo_tracker.has("finalize"):
+                todo_tracker.set_status("finalize", "pending")
+            todo_tracker.activate_first_pending("edit", "layout", "patch")
+            if finalize_reject_count > finalize_reject_max:
+                logger.warning(
+                    "Designer finalize validation still failing after %s rejects (%s)",
+                    finalize_reject_count,
+                    source,
+                )
+                return True
+            reject_body = format_finalize_reject_message(
+                workspace=workspace,
+                review=review,
+                original_message=effective_request,
+            )
+            assistant_payload = assistant_raw if isinstance(assistant_raw, dict) else {"kind": source}
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": json.dumps(assistant_payload, ensure_ascii=False)[:12000],
+                }
+            )
+            messages.append({"role": "user", "content": reject_body[:28000]})
+            messages[:] = condense_tool_loop_messages(messages, graph_thread_id=graph_thread_id)
+            emit_agent_todos()
+            return False
+
         for turn in range(max_turns):
+            if user_id is not None and is_designer_agent_cancel_requested(user_id=user_id):
+                return cancelled_result()
             inject_session_memory_message(messages, session_memory)
 
             _emit_tool(
@@ -619,6 +758,11 @@ class DesignerToolLoopRunner:
                     workspace.css_stylesheet = str(finish_payload.get("css_stylesheet"))
                 if finish_payload.get("js_script"):
                     workspace.js_script = str(finish_payload.get("js_script"))
+                if not finalize_gate_allows_finish(
+                    source="model_finish",
+                    assistant_raw=finish_payload if isinstance(finish_payload, dict) else None,
+                ):
+                    continue
                 todo_tracker.mark_all_done()
                 emit_agent_todos()
                 _emit_preview(on_preview_event, workspace)
@@ -695,16 +839,15 @@ class DesignerToolLoopRunner:
                             label=mutate_summary,
                         )
                         if getattr(settings, "DESIGNER_VALIDATE_AFTER_MUTATE", True):
-                            gate_review = validate_template_deterministic_gate(
-                                html=workspace.html_markup,
-                                css=workspace.css_stylesheet,
-                                js=workspace.js_script,
+                            gate_review = run_post_edit_validation(
+                                workspace,
                                 message=effective_request,
                                 history=history,
                             )
                             result["validation_after_mutate"] = {
                                 "valid": bool(gate_review.get("valid")),
                                 "issues": list(gate_review.get("issues") or []),
+                                "diagnostics": list(gate_review.get("diagnostics") or []),
                                 "summary": str(gate_review.get("summary") or ""),
                             }
                             gate_ok = bool(gate_review.get("valid"))
@@ -765,12 +908,7 @@ class DesignerToolLoopRunner:
                     )
                     gate = result.get("validation_after_mutate")
                     if isinstance(gate, dict) and gate.get("valid") is False:
-                        issue_lines = gate.get("issues") or []
-                        batch_result_lines.append(
-                            "CONTROL: Post-edit validation failed (same rules as Check template). "
-                            "Fix these issues before the execution plan advances:\n"
-                            + "\n".join(f"- {item}" for item in issue_lines[:15])
-                        )
+                        batch_result_lines.append(format_diagnostics_control_block(gate))
                     if tool_mutated_template(tool_name, result):
                         preview_dirty = True
 
@@ -808,7 +946,7 @@ class DesignerToolLoopRunner:
                 if greenfield_readonly_turns >= 2:
                     batch_result_lines.append(
                         "CONTROL: GREENFIELD template — stop overview/search loops. "
-                        "Your next batch MUST use append_template on html, css, and js."
+                        "Your next batch MUST use append_template(file=html) with a full Tailwind single-file scaffold."
                     )
                     must_mutate_after_readonly = True
             elif preview_dirty:
@@ -832,6 +970,8 @@ class DesignerToolLoopRunner:
                 last_batch_had_mutate=last_batch_had_mutate,
                 last_batch_gate_valid=last_batch_gate_valid,
             ):
+                if not finalize_gate_allows_finish(source="auto_finish"):
+                    continue
                 assistant_message = (
                     "Updated the proposal template with targeted edits."
                 )
@@ -864,7 +1004,7 @@ class DesignerToolLoopRunner:
                             )[:12000],
                         }
                     )
-                    messages[:] = condense_tool_loop_messages(messages)
+                    messages[:] = condense_tool_loop_messages(messages, graph_thread_id=graph_thread_id)
                     continue
 
                 stuck_loop = True
@@ -897,7 +1037,7 @@ class DesignerToolLoopRunner:
                     "content": "Tool results (batch):\n" + "\n---\n".join(batch_result_lines)[:24000],
                 }
             )
-            messages[:] = condense_tool_loop_messages(messages)
+            messages[:] = condense_tool_loop_messages(messages, graph_thread_id=graph_thread_id)
         else:
             exhausted = True
             (
@@ -931,12 +1071,25 @@ class DesignerToolLoopRunner:
                 "tool_steps": len(tool_trace),
                 "tool_turns": len({t.get("turn") for t in tool_trace if t.get("turn")}),
                 "tool_trace": tool_trace[:60],
+                "edit_ledger": build_edit_ledger_from_tool_trace(tool_trace),
                 "agent_todos": todo_tracker.snapshot(),
                 "tool_session_graph": session_memory.to_dict(),
+                "checkpoint_thread_id": graph_thread_id or "",
+                "executor_session": build_executor_session_from_result(
+                    {
+                        "tool_trace": tool_trace,
+                        "tool_session_graph": session_memory.to_dict(),
+                        "edit_ledger": build_edit_ledger_from_tool_trace(tool_trace),
+                        "checkpoint_thread_id": graph_thread_id,
+                    },
+                    workspace,
+                    graph_thread_id=graph_thread_id or "",
+                ),
             }
         )
-        _emit_preview(on_preview_event, workspace)
         if exhausted:
+            if last_finalize_review is not None:
+                out["finalize_validation"] = last_finalize_review
             out["tool_loop_exhausted"] = True
             out["continuation_recommended"] = True
             out["remaining_items"] = remaining_items
@@ -946,18 +1099,20 @@ class DesignerToolLoopRunner:
                 out["tool_loop_stuck"] = True
             if model_api_failed:
                 out["model_api_error"] = True
-            logger.warning(
-                "Designer tool loop exhausted (turns=%s, repair=%s, stuck=%s, model_api_failed=%s)",
-                max_turns,
-                repair_mode,
-                stuck_loop,
-                model_api_failed,
-            )
         elif finished_cleanly:
             out["partial_completion"] = False
             out["continuation_recommended"] = False
             out.pop("model_api_error", None)
             out["remaining_items"] = []
+            if last_finalize_review is not None:
+                out["finalize_validation"] = last_finalize_review
+                if not last_finalize_review.get("valid"):
+                    out["validation_blockers"] = list(last_finalize_review.get("issues") or [])[:16]
+                    out["partial_completion"] = True
+                    out["continuation_recommended"] = True
+                    out["remaining_items"] = (out.get("remaining_items") or []) + [
+                        "Fix finalize validation blockers"
+                    ]
             out["clarification_options"] = [
                 o
                 for o in (out.get("clarification_options") or [])

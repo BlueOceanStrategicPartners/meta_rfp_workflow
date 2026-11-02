@@ -24,6 +24,28 @@ class RoomBlockNight(BaseModel):
     suite: int = 0
 
 
+class RoomBlockLineItem(BaseModel):
+    """Proposal table row — maps to {{verified_room_blocks}} tbody columns."""
+
+    category_name: str
+    category_subtitle: str = ""
+    badge: str = ""
+    date_range: str = ""
+    nights: int = 0
+    quantity: int = 0
+    rate_per_night: float | int | None = None
+    estimated_total: float | int | None = None
+
+
+class RoomBlockSummary(BaseModel):
+    rooms_per_night: int = 0
+    nights: int = 0
+    room_nights: int = 0
+    avg_rate_per_night: int = 0
+    grand_total: int = 0
+    policy_notes: str = ""
+
+
 class RFPExtractionPayload(BaseModel):
     company_name: ExtractedField | None = None
     event_type: ExtractedField | None = None

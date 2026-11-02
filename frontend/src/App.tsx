@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Navigate, NavLink, Route, Routes, useLocation, useNavigate } from "react-router-dom";
+import { NavLink, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import ConfirmDialog from "./components/designer/ConfirmDialog";
 import TemplateIconButton, { IconLogout, IconMoon, IconSun } from "./components/designer/TemplateIconButton";
 import {
@@ -105,7 +105,6 @@ export default function App() {
           <Route path="/" element={<ClientWorkspace />} />
           <Route path="/client" element={<ClientWorkspace />} />
           <Route path="/designer" element={<DesignerPortal />} />
-          <Route path="/map" element={<Navigate to="/designer" replace />} />
           <Route path="/admin" element={<AdminPortal />} />
         </Routes>
       </main>

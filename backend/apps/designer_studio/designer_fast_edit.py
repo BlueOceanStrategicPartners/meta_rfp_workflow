@@ -4,6 +4,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from .agent_rules import hybrid_query_document_score
 from .template_symbol_index import index_template_file
 from .template_workspace import TemplateWorkspace
 
@@ -97,7 +98,36 @@ def format_edit_target_hints(workspace: TemplateWorkspace, message: str = "") ->
             syms = index_template_file(workspace, file)
         except (ValueError, TypeError):
             continue
+        if file == "html":
+            sections = [s for s in syms if s.kind == "proposal_section"]
+            if sections and (message or "").strip():
+                ranked = sorted(
+                    sections,
+                    key=lambda s: hybrid_query_document_score(
+                        message, f"{s.name} {s.preview}"
+                    ),
+                    reverse=True,
+                )
+                sections = ranked
+            for sym in sections:
+                if queries and not any(
+                    q.lower() in f"{sym.name} {sym.preview}".lower() for q in queries
+                ):
+                    if hybrid_query_document_score(message, f"{sym.name} {sym.preview}") < 0.12:
+                        continue
+                if sym.id in seen_ids:
+                    continue
+                seen_ids.add(sym.id)
+                lines.append(
+                    f"  • {sym.id} — {sym.name} (section lines {sym.start_line}-{sym.end_line})"
+                )
+                if len(seen_ids) >= MAX_EDIT_HINTS:
+                    break
+            if len(seen_ids) >= MAX_EDIT_HINTS:
+                break
         for sym in syms:
+            if sym.kind == "proposal_section":
+                continue
             blob = f"{sym.name} {sym.preview}".lower()
             if not any(q.lower() in blob for q in queries):
                 continue

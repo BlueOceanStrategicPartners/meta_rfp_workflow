@@ -153,6 +153,8 @@ function createSseDispatcher(handlers: DesignerChatStreamHandlers) {
         });
       } else if (eventName === "error" && typeof payload.message === "string") {
         handlers.onError?.(payload.message);
+      } else if (eventName === "cancelled") {
+        throw new DOMException("Design agent stopped", "AbortError");
       }
     } catch (err) {
       if (import.meta.env.DEV) {

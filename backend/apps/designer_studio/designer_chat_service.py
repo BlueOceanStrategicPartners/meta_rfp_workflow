@@ -15,23 +15,32 @@ from django.utils import timezone
 
 from .agent_rules import format_rules_for_agent, retrieve_relevant_rules
 from .design_agent import DesignerStudioAgent
+from .designer_graph_state import resolve_template_langgraph_thread_id
 from .designer_chat_guards import (
     build_preview_audit_block,
     try_floorplan_attachment_reminder,
     user_message_reports_preview_issue,
 )
-from .designer_map_orchestration import merge_clarification_options, run_map_stage_if_needed
+from .attachment_context import (
+    AttachmentRole,
+    classify_attachments,
+    default_message_for_attachments,
+    floorplan_image_urls,
+    format_assets_for_agent,
+    is_pasted_screenshot_name,
+    patch_metadata_roles,
+)
 from .designer_work_plan import (
     WorkPlanTracker,
     build_work_plan,
-    guess_include_venue_map,
 )
 from .designer_live_progress import (
     begin_live_progress,
+    clear_designer_agent_cancel,
     end_live_progress,
+    is_designer_agent_cancel_requested,
     patch_live_progress,
 )
-from .media_service import format_assets_for_agent
 from .models import DesignerMediaAsset, ProposalTemplate
 from .preview_automation_context import (
     format_preview_automation_for_agent,
@@ -39,9 +48,10 @@ from .preview_automation_context import (
     validate_automation_request,
 )
 from .preview_audit import audit_compiled_proposal_preview
+from .proposal_template_normalize import normalize_proposal_template_fields
+from .finalize_validation import run_systematic_finalize_validation
+from .template_workspace import TemplateWorkspace
 from .serializers import DesignerMediaAssetSerializer
-from .venue_map_admin import try_handle_venue_map_admin_message
-from .venue_map_context import build_default_map_agent_context
 
 logger = logging.getLogger(__name__)
 
@@ -117,12 +127,42 @@ def _assistant_action_state(result: dict[str, Any]) -> dict[str, Any]:
     if opts:
         return {"action_state": {"clarification_options": opts}}
 
+    ledger = result.get("edit_ledger")
+    todos = list(result.get("agent_todos") or [])[:16]
+    graph = result.get("tool_session_graph") or {}
+    msg = str(result.get("assistant_message") or "").strip()
+    has_session = bool(ledger or todos or graph) or int(result.get("tool_steps") or 0) > 0
+    if has_session:
+        todos_complete = bool(todos) and all(
+            str(t.get("status") or "") in ("done", "skipped") for t in todos
+        )
+        if todos_complete and not result.get("partial_completion"):
+            todos = []
+        state: dict[str, Any] = {
+            "agent_todos": todos,
+            "edit_ledger": ledger if isinstance(ledger, dict) else {},
+            "tool_session_graph": graph if isinstance(graph, dict) else {},
+            "last_assistant_message": msg[:500],
+        }
+        prior_user = str(result.get("prior_user_request") or "")[:2000]
+        if prior_user:
+            state["prior_user_request"] = prior_user
+        return {"action_state": state}
+
     return {}
+
+
+from .single_file_template import template_storage_mode
 
 
 def _normalize_designer_chat_result(result: dict[str, Any]) -> dict[str, Any]:
     """Drop stale partial/retry UI when the template was updated successfully."""
     out = dict(result)
+    html = str(out.get("html_markup") or "")
+    if template_storage_mode(html, str(out.get("css_stylesheet") or ""), str(out.get("js_script") or "")) == "single":
+        if html.strip():
+            out["css_stylesheet"] = ""
+            out["js_script"] = ""
     msg = str(out.get("assistant_message") or "").strip()
     todos = out.get("agent_todos") or []
     todos_complete = bool(todos) and all(
@@ -169,11 +209,14 @@ def iter_designer_chat(
     css_stylesheet = data.get("css_stylesheet") or ""
     js_script = data.get("js_script") or ""
     template_id = data.get("template_id")
+    graph_thread_id = ""
 
     assets = list(
         DesignerMediaAsset.objects.filter(id__in=attachment_ids, designer=user)
     )
-    attachment_block = format_assets_for_agent(assets)
+    patch_metadata_roles(assets, message)
+    attachment_block = format_assets_for_agent(assets, message=message)
+    effective_message = default_message_for_attachments(message, assets)
     automation_report = parse_automation_report(data.get("preview_automation_report"))
     automation_depth = int(data.get("preview_automation_depth") or 0)
     automation_err = validate_automation_request(
@@ -185,35 +228,26 @@ def iter_designer_chat(
         yield ("error", {"message": automation_err})
         return
 
-    include_audit = user_message_reports_preview_issue(message or "") or bool(
+    include_audit = user_message_reports_preview_issue(effective_message) or bool(
         data.get("include_preview_audit")
     )
-    include_map_guess = guess_include_venue_map(message, bool(assets))
 
     template = None
     if template_id:
         template = ProposalTemplate.objects.filter(pk=template_id, designer=user).first()
 
     admin_result = None
-    if message:
-        admin_result = try_handle_venue_map_admin_message(
-            message=message,
-            user=user,
-            html_markup=html_markup,
-            css_stylesheet=css_stylesheet,
-        )
 
-    short_path = bool(admin_result)
+    short_path = False
     reminder = None
-    if not admin_result and message:
+    if message:
         reminder = try_floorplan_attachment_reminder(message=message, assets=assets)
         if reminder:
             short_path = True
 
     plan_steps = build_work_plan(
-        message=message or "Update the proposal template",
+        message=effective_message or "Update the proposal template",
         include_preview_audit=include_audit and not short_path,
-        include_venue_map=include_map_guess and not short_path,
         short_path=short_path,
     )
     tracker = WorkPlanTracker(plan_steps)
@@ -221,26 +255,15 @@ def iter_designer_chat(
 
     live_progress_user_id: int | None = None
 
-    if admin_result:
-        yield _step_event(tracker, "understand_brief", "active")
-        result = {**admin_result, "js_script": js_script}
-        map_result = None
-        venue_map = None
-        map_ran = False
-        yield _step_event(tracker, "understand_brief", "done")
-    elif reminder:
+    if reminder:
         yield _step_event(tracker, "understand_brief", "active")
         result = {
             **reminder,
             "html_markup": html_markup,
-            "css_stylesheet": css_stylesheet,
-            "js_script": js_script,
-            "map_stage_applied": False,
+            "css_stylesheet": "",
+            "js_script": "",
             "self_check": {"valid": True, "issues": []},
         }
-        map_result = None
-        venue_map = None
-        map_ran = False
         yield _step_event(tracker, "understand_brief", "done")
     else:
         preview_audit_block = ""
@@ -249,11 +272,25 @@ def iter_designer_chat(
                 html_markup, css_stylesheet, js_script
             )
         preview_automation_block = format_preview_automation_for_agent(automation_report)
-        venue_map_block = build_default_map_agent_context(user)
-        rules = retrieve_relevant_rules(user.id, message or "Update proposal template")
+        from apps.venue_map_studio.map_knowledge_tools import build_map_knowledge_for_proposal_agent
+
+        floorplan_urls = floorplan_image_urls(effective_message, assets)
+        map_knowledge_block = build_map_knowledge_for_proposal_agent(
+            floorplan_urls=floorplan_urls or None
+        )
+        rules = retrieve_relevant_rules(user.id, effective_message or "Update proposal template")
         agent_rules_block = format_rules_for_agent(rules)
 
         agent = DesignerStudioAgent()
+        if template_id:
+            stored = ""
+            if template:
+                stored = str(getattr(template, "langgraph_thread_id", "") or "").strip()
+            graph_thread_id = resolve_template_langgraph_thread_id(
+                user_id=getattr(user, "pk", None),
+                template_id=str(template_id),
+                stored_thread_id=stored or None,
+            )
         progress_queue: queue.Queue[tuple[str, dict[str, Any]]] = queue.Queue()
         preview_last_mono = 0.0
         uid = getattr(user, "pk", None)
@@ -288,18 +325,19 @@ def iter_designer_chat(
         def run_chat() -> None:
             try:
                 chat_result["value"] = agent.chat_turn(
-                    message=message or "Use the attached media in the proposal design.",
+                    message=effective_message or "Update the proposal template.",
                     history=history,
                     html_markup=html_markup,
                     css_stylesheet=css_stylesheet,
                     js_script=js_script,
                     attachment_block=attachment_block,
-                    venue_map_block=venue_map_block,
+                    map_knowledge_block=map_knowledge_block,
                     preview_audit_block=preview_audit_block,
                     preview_automation_block=preview_automation_block,
                     agent_rules_block=agent_rules_block,
                     user_id=getattr(user, "pk", None),
                     template_id=str(template_id) if template_id else None,
+                    graph_thread_id=graph_thread_id or None,
                     on_work_step=on_work_step,
                     on_tool_event=on_tool_event,
                     on_todo_event=on_todo_event,
@@ -313,6 +351,8 @@ def iter_designer_chat(
         worker.start()
         last_progress = time.monotonic()
         while worker.is_alive() or not progress_queue.empty():
+            if uid is not None and is_designer_agent_cancel_requested(user_id=uid):
+                break
             try:
                 yield progress_queue.get(timeout=0.25)
                 last_progress = time.monotonic()
@@ -321,22 +361,22 @@ def iter_designer_chat(
                     yield ("heartbeat", {"ts": time.time()})
                     last_progress = time.monotonic()
                 continue
-        worker.join()
+        worker.join(timeout=0.5)
+        cancelled = uid is not None and is_designer_agent_cancel_requested(user_id=uid)
         end_live_progress(user_id=uid)
+        if cancelled:
+            clear_designer_agent_cancel(user_id=uid)
+            yield ("cancelled", {"message": "Design agent stopped."})
+            return
         if chat_error:
             raise chat_error[0]
         result = chat_result["value"]
         result = _normalize_designer_chat_result(result)
-
-        map_result, venue_map = run_map_stage_if_needed(
-            message=message or "",
-            design_result=result,
-            assets=assets,
-            attachment_block=attachment_block,
-            template=template,
-            user=user,
-        )
-        map_ran = map_result is not None
+        if result.get("agent_cancelled"):
+            if uid is not None:
+                clear_designer_agent_cancel(user_id=uid)
+            yield ("cancelled", {"message": "Design agent stopped."})
+            return
 
         if "preview_audit" in {s["id"] for s in tracker.snapshot()}:
             if include_audit and preview_audit_block:
@@ -353,30 +393,6 @@ def iter_designer_chat(
                 yield _step_event(tracker, "preview_audit", "done")
             else:
                 yield _step_event(tracker, "preview_audit", "skipped")
-
-        if "venue_map" in {s["id"] for s in tracker.snapshot()}:
-            if map_ran:
-                yield _step_event(tracker, "venue_map", "active")
-                if map_result and venue_map:
-                    map_note = map_result.get("assistant_message") or "Interactive venue map updated."
-                    result["assistant_message"] = (
-                        f"{result['assistant_message']}\n\n— Map stage —\n{map_note}".strip()
-                    )
-                yield _step_event(tracker, "venue_map", "done")
-            else:
-                yield _step_event(tracker, "venue_map", "skipped")
-
-        result["clarification_options"] = merge_clarification_options(
-            result, map_result, map_ran=map_ran
-        )
-        result["map_stage_applied"] = map_ran
-        if venue_map:
-            result["venue_map_id"] = str(venue_map.id)
-            result["venue_map_title"] = venue_map.title
-
-    if admin_result:
-        result.setdefault("map_stage_applied", False)
-        result.setdefault("clarification_options", [])
 
     if result.get("model_api_error"):
         yield (
@@ -398,10 +414,54 @@ def iter_designer_chat(
         live_progress_user_id=live_progress_user_id,
     )
 
-    display_message = message
+    norm_html, norm_css, norm_js = normalize_proposal_template_fields(
+        str(result.get("html_markup") or html_markup),
+        str(result.get("css_stylesheet") or css_stylesheet),
+        str(result.get("js_script") or js_script),
+    )
+    result["html_markup"] = norm_html
+    result["css_stylesheet"] = norm_css
+    result["js_script"] = norm_js
+
+    if getattr(settings, "DESIGNER_FINALIZE_VALIDATION_ENABLED", True):
+        finalize_ws = TemplateWorkspace(
+            html_markup=norm_html,
+            css_stylesheet=norm_css,
+            js_script=norm_js,
+        )
+        finalize_review = run_systematic_finalize_validation(
+            workspace=finalize_ws,
+            message=effective_message,
+            history=history,
+        )
+        result["finalize_validation"] = finalize_review
+        yield (
+            "status",
+            {
+                "kind": "finalize_validation",
+                "valid": bool(finalize_review.get("valid")),
+                "issue_count": len(finalize_review.get("issues") or []),
+                "summary": str(finalize_review.get("summary") or "")[:500],
+            },
+        )
+        if not finalize_review.get("valid"):
+            blockers = list(finalize_review.get("issues") or [])[:16]
+            result["validation_blockers"] = blockers
+            result["partial_completion"] = True
+            result["continuation_recommended"] = True
+            remaining = list(result.get("remaining_items") or [])
+            remaining.append("Fix finalize validation issues (pool edit pass)")
+            result["remaining_items"] = remaining[:12]
+
+    display_message = effective_message
     if assets:
-        names = ", ".join(a.original_name for a in assets)
-        display_message = f"{message}\n[Attachments: {names}]".strip()
+        roles = classify_attachments(effective_message, assets)
+        role_bits = []
+        for a in assets:
+            r = roles.get(str(a.id), AttachmentRole.PROPOSAL_MEDIA)
+            role_bits.append(f"{a.original_name} ({r.value})")
+        names = ", ".join(role_bits)
+        display_message = f"{effective_message}\n[Attachments: {names}]".strip()
 
     new_history = list(history)
     now = timezone.now().isoformat()
@@ -428,18 +488,27 @@ def iter_designer_chat(
             template = ProposalTemplate.objects.filter(pk=template_id, designer=user).first()
         if template:
             template.chat_history_json = new_history
-            template.html_markup = result["html_markup"]
-            template.css_stylesheet = result["css_stylesheet"]
-            template.js_script = result.get("js_script", js_script)
-            template.save(
-                update_fields=[
-                    "chat_history_json",
-                    "html_markup",
-                    "css_stylesheet",
-                    "js_script",
-                    "updated_at",
-                ]
-            )
+            template.html_markup = norm_html
+            template.css_stylesheet = norm_css
+            template.js_script = norm_js
+            ck_thread = str(result.get("checkpoint_thread_id") or graph_thread_id or "").strip()
+            ck_id = str(result.get("graph_checkpoint_id") or "").strip()
+            if ck_thread:
+                template.langgraph_thread_id = ck_thread[:160]
+            if ck_id:
+                template.langgraph_checkpoint_id = ck_id[:128]
+            update_fields = [
+                "chat_history_json",
+                "html_markup",
+                "css_stylesheet",
+                "js_script",
+                "updated_at",
+            ]
+            if ck_thread:
+                update_fields.append("langgraph_thread_id")
+            if ck_id:
+                update_fields.append("langgraph_checkpoint_id")
+            template.save(update_fields=update_fields)
 
     yield (
         "done",

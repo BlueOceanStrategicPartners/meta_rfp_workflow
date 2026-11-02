@@ -26,6 +26,12 @@ class DesignerGraphPlanSlice(TypedDict, total=False):
     plan_source: str
 
 
+class DesignerGraphExecutorSessionSlice(TypedDict, total=False):
+    """Checkpointed executor memory — survives tool-loop message condensation across turns."""
+
+    executor_session: dict[str, Any]
+
+
 class DesignerGraphRunMeta(TypedDict, total=False):
     """Graph control metadata (not LangGraph reserved keys)."""
 
@@ -50,6 +56,7 @@ class DesignerGraphResultSlice(TypedDict, total=False):
 class DesignerGraphState(
     DesignerGraphTurnInput,
     DesignerGraphPlanSlice,
+    DesignerGraphExecutorSessionSlice,
     DesignerGraphRunMeta,
     DesignerGraphValidationSlice,
     DesignerGraphResultSlice,
@@ -70,6 +77,19 @@ def build_graph_thread_id(*, user_id: int | str, template_id: str | None = None)
     return f"designer-{user_id}-{tid}"
 
 
+def resolve_template_langgraph_thread_id(
+    *,
+    user_id: int | str | None,
+    template_id: str | None,
+    stored_thread_id: str | None = None,
+) -> str:
+    """One stable LangGraph checkpoint thread per template (industry default for durable agent sessions)."""
+    stored = (stored_thread_id or "").strip()
+    if stored:
+        return stored
+    uid = user_id if user_id is not None else "anon"
+    return build_graph_thread_id(user_id=uid, template_id=template_id)
+
 def initial_graph_state(
     *,
     message: str,
@@ -79,6 +99,7 @@ def initial_graph_state(
     js_script: str,
     context_prefix: str,
     thread_id: str,
+    user_id: int | str | None = None,
 ) -> DesignerGraphState:
     from .designer_graph_checkmate import DesignerGraphTerminal
 
@@ -91,4 +112,5 @@ def initial_graph_state(
         "context_prefix": context_prefix,
         "terminal": DesignerGraphTerminal.IN_PROGRESS.value,
         "graph_thread_id": thread_id,
+        "user_id": user_id,
     }

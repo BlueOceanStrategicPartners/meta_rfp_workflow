@@ -8,7 +8,6 @@ export function useBidirectionalAgentUI(
   onAgentUtterance?: (text: string, options?: { mandatory?: boolean }) => void,
 ) {
   const [cards, setCards] = useState<Record<string, unknown>>({});
-  const [mapHighlights, setMapHighlights] = useState<string[]>([]);
   const [proposalHtml, setProposalHtml] = useState<string | null>(null);
   const [debateRings, setDebateRings] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -35,9 +34,6 @@ export function useBidirectionalAgentUI(
         if (cardsHaveExtraction(next) || Object.keys(next).length) {
           setCards(next);
         }
-      }
-      if (msg.type === "map_highlight") {
-        setMapHighlights((msg.payload?.zone_ids as string[]) || []);
       }
       if (msg.type === "proposal_html") {
         setProposalHtml(String(msg.payload?.html || ""));
@@ -71,7 +67,6 @@ export function useBidirectionalAgentUI(
 
   return {
     cards,
-    mapHighlights,
     proposalHtml,
     debateRings,
     error,

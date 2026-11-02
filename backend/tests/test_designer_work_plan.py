@@ -9,7 +9,6 @@ def test_build_work_plan_includes_optional_stages():
     steps = build_work_plan(
         message="Fix preview overlap on the map popup",
         include_preview_audit=True,
-        include_venue_map=False,
     )
     ids = [s["id"] for s in steps]
     assert "understand_brief" in ids

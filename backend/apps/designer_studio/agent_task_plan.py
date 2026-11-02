@@ -12,6 +12,8 @@ INVESTIGATE_TOOLS = frozenset(
         "read_template_symbol",
         "search_template",
         "read_template_lines",
+        "get_map_knowledge",
+        "get_map_reference_code",
     }
 )
 MUTATE_TOOLS = frozenset({"replace_exact", "replace_lines", "append_template"})
@@ -213,9 +215,13 @@ def sync_todos_after_tool(
                 tracker.activate_first_pending("patch")
         if tool in MUTATE_TOOLS:
             tracker.set_status("patch", "active")
-            if ok:
+            gate = result.get("validation_after_mutate")
+            if ok and not (isinstance(gate, dict) and gate.get("valid") is False):
                 tracker.set_status("patch", "done")
                 tracker.set_status("verify", "active")
+            elif isinstance(gate, dict) and gate.get("valid") is False:
+                tracker.set_status("patch", "active")
+                return
         if tool == "validate_template":
             tracker.set_status("verify", "active")
             if ok and result.get("valid"):
@@ -238,7 +244,8 @@ def sync_todos_after_tool(
 
     if tool in MUTATE_TOOLS or tool == "append_template":
         gate = result.get("validation_after_mutate")
-        if ok:
+        lint_blocks = isinstance(gate, dict) and gate.get("valid") is False
+        if ok and not lint_blocks:
             if tracker.has("scaffold") and tracker.status("scaffold") != "done":
                 tracker.set_status("scaffold", "done")
             if tracker.has("investigate") and tracker.status("investigate") != "done":
@@ -247,13 +254,21 @@ def sync_todos_after_tool(
             tracker.set_status("layout", "active")
         if tool in MUTATE_TOOLS or (tool == "append_template" and ok):
             tracker.set_status("edit", "active")
-        if ok and tool in MUTATE_TOOLS:
+        if ok and tool in MUTATE_TOOLS and not lint_blocks:
             if tracker.has("layout") and tracker.status("layout") == "active":
                 tracker.set_status("layout", "done")
             if tracker.status("edit") == "active":
                 tracker.set_status("edit", "done")
                 if tracker.has("finalize") and tracker.status("finalize") == "pending":
                     tracker.activate_first_pending("finalize")
+        elif lint_blocks:
+            if tracker.has("edit"):
+                tracker.set_status("edit", "active")
+            return
+
+    if tool == "lint_template":
+        if not result.get("valid") and tracker.has("edit"):
+            tracker.set_status("edit", "active")
 
     if tool == "validate_template":
         if tracker.has("finalize") and tracker.status("finalize") == "pending":

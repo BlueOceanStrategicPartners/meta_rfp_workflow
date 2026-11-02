@@ -381,14 +381,14 @@ class MetaModelClient:
 
     @staticmethod
     def _designer_fixture_html(instruction: str = "") -> dict[str, Any]:
-        from apps.designer_studio.models import REQUIRED_PLACEHOLDERS
+        from apps.designer_studio.models import ALL_BINDING_PLACEHOLDERS
 
         dark = "dark" in instruction.lower() or "luxury" in instruction.lower()
         bg = "#0f0f12" if dark else "#fafafa"
         accent = "#c9a227" if dark else "#1a56db"
         sections = "".join(
             f"<section class='block'><h2>{p}</h2><div>{p}</div></section>"
-            for p in REQUIRED_PLACEHOLDERS
+            for p in ALL_BINDING_PLACEHOLDERS
         )
         media_block = ""
         if "url=" in instruction:
@@ -432,69 +432,6 @@ class MetaModelClient:
             "html_markup": html,
             "css_stylesheet": css,
             "js_script": js,
-        }
-
-    @staticmethod
-    def _map_fixture_interactive(instruction: str = "") -> dict[str, Any]:
-        import re
-
-        urls = re.findall(r"url=(https?://[^\s]+)", instruction)
-        photo = urls[0] if urls else "https://placehold.co/640x360/png?text=Ballroom"
-        locations = [
-            {
-                "id": "grand-ballroom",
-                "label": "Grand Sapphire Ballroom",
-                "description": "Main event hall with dual 4K projection and divisible airwalls.",
-                "image_urls": [photo],
-            },
-            {
-                "id": "lotus-pavilion",
-                "label": "Lotus Pavilion",
-                "description": "Garden-facing breakout space with natural light.",
-                "image_urls": [photo],
-            },
-        ]
-        html = (
-            "<div class='venue-map-root' id='venue-map'>"
-            "<img class='floorplan' src='https://placehold.co/800x500/png?text=Floorplan' alt='Floorplan'/>"
-            "<button type='button' class='zone' data-location-id='grand-ballroom'>Grand Ballroom</button>"
-            "<button type='button' class='zone' data-location-id='lotus-pavilion'>Lotus Pavilion</button>"
-            "<div id='map-popup' class='map-popup hidden' role='dialog' aria-hidden='true'></div>"
-            "</div>"
-        )
-        css = (
-            ".venue-map-root{position:relative;max-width:100%;}"
-            ".floorplan{width:100%;border-radius:12px;display:block;}"
-            ".zone{position:absolute;padding:0.5rem 0.75rem;border:2px solid #0af;background:rgba(0,180,255,0.25);"
-            "color:#fff;border-radius:8px;cursor:pointer;}"
-            ".zone:nth-of-type(1){top:28%;left:18%;}"
-            ".zone:nth-of-type(2){top:55%;left:58%;}"
-            ".map-popup{position:fixed;inset:20% 15%;background:#0f172a;color:#f8fafc;padding:1rem;border-radius:16px;"
-            "box-shadow:0 20px 60px rgba(0,0,0,0.45);overflow:auto;z-index:50;}"
-            ".map-popup.hidden{display:none;}"
-            ".map-popup img{max-width:100%;border-radius:8px;margin-top:0.75rem;}"
-        )
-        js = (
-            "var LOCS={grand-ballroom:{label:'Grand Sapphire Ballroom',description:'Main event hall.',"
-            "imageUrls:['"
-            + photo
-            + "']},lotus-pavilion:{label:'Lotus Pavilion',description:'Garden breakout.',imageUrls:['"
-            + photo
-            + "']}};"
-            "function showPopup(id){var d=LOCS[id];if(!d)return;var p=document.getElementById('map-popup');"
-            "p.classList.remove('hidden');p.innerHTML='<h2>'+d.label+'</h2><p>'+d.description+'</p>'+"
-            "(d.imageUrls||[]).map(function(u){return '<img src=\"'+u+'\" alt=\"\"/>';}).join('');"
-            "window.parent.postMessage({type:'venue-map-select',locationId:id,label:d.label,"
-            "description:d.description,imageUrls:d.imageUrls||[]},'*');}"
-            "document.querySelectorAll('[data-location-id]').forEach(function(el){"
-            "el.addEventListener('click',function(){showPopup(el.getAttribute('data-location-id'));});});"
-        )
-        return {
-            "assistant_message": "Built an interactive floorplan with labeled zones, photo popups, and parent postMessage hooks.",
-            "html_markup": html,
-            "css_stylesheet": css,
-            "js_script": js,
-            "locations": locations,
         }
 
     def _fixture_response(
@@ -564,15 +501,6 @@ class MetaModelClient:
             return self._designer_fixture_html(instruction)
         if fixture_kind == "designer_validate" or fixture_kind == "designer_save_validate" or "validate compiled hospitality" in system_prompt.lower() or "before save" in system_prompt.lower():
             return {"valid": True, "issues": [], "summary": "Fixture validation passed."}
-        if fixture_kind == "map_chat" or "Interactive Venue Map Architect" in system_prompt:
-            instruction = (
-                user_content.split("Map design request:")[-1]
-                if "Map design request:" in user_content
-                else user_content
-            )
-            return self._map_fixture_interactive(instruction)
-        if fixture_kind == "map_validate" or "validate compiled interactive hospitality venue" in system_prompt.lower():
-            return {"valid": True, "issues": [], "summary": "Fixture map validation passed."}
         if "re-extract" in user_content.lower() or "iteration" in user_content.lower():
             return self._sample_extraction(mismatch=False)
         if "critic" in user_content.lower() or "cross-examine" in user_content.lower():

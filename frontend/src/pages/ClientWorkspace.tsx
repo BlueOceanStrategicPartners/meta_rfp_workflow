@@ -4,8 +4,6 @@ import CentralVoiceOrb from "../components/canvas3d/CentralVoiceOrb";
 import ComposerDock from "../components/composer/ComposerDock";
 import WindowDragAndDropOverlay from "../components/composer/WindowDragAndDropOverlay";
 import AgentCardDeck from "../components/generative_ui/AgentCardDeck";
-import SidePanelVenueMap from "../components/generative_ui/SidePanelVenueMap";
-import VenueMapToggleButton from "../components/generative_ui/VenueMapToggleButton";
 import ProposalTemplateRenderer from "../components/generative_ui/ProposalTemplateRenderer";
 import VoiceAgentSubtitles, { type CaptionLine } from "../components/voice/VoiceAgentSubtitles";
 import { useVoiceOrbAudio } from "../hooks/useVoiceOrbAudio";
@@ -15,7 +13,6 @@ import { unlockBrowserAudio, primeAudioSync, useSeamlessM4TV2 } from "../hooks/u
 import { cardsHaveExtraction, quickVoiceAck, shouldStartAutonomousPipeline } from "../lib/rfpFlow";
 import { createRfpSession, fetchRfpCards, waitForRfpCards } from "../lib/rfpApi";
 import { streamAssistantReply } from "../lib/voiceChatStream";
-import { fetchPublishedVenueMap, type MapLocation } from "../lib/mapStudioApi";
 
 function newCaptionId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
@@ -24,9 +21,6 @@ function newCaptionId() {
 export default function ClientWorkspace() {
   const [composerOpen, setComposerOpen] = useState(true);
   const [dragging, setDragging] = useState(false);
-  const [mapOpen, setMapOpen] = useState(false);
-  const [publishedMapHtml, setPublishedMapHtml] = useState("");
-  const [publishedLocations, setPublishedLocations] = useState<MapLocation[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const sessionIdRef = useRef<string | null>(null);
   sessionIdRef.current = sessionId;
@@ -187,7 +181,7 @@ export default function ClientWorkspace() {
     [appendCaption, speakOnce],
   );
 
-  const { cards, mapHighlights, proposalHtml, debateRings, error, submitCardMutation, setCards } =
+  const { cards, proposalHtml, debateRings, error, submitCardMutation, setCards } =
     useBidirectionalAgentUI(sessionId, handleAgentUtterance);
 
   const ensureSession = useCallback(
@@ -229,16 +223,6 @@ export default function ClientWorkspace() {
     },
     [setCards],
   );
-
-  useEffect(() => {
-    fetchPublishedVenueMap()
-      .then((data) => {
-        if (!data) return;
-        setPublishedMapHtml(data.compiled_html);
-        setPublishedLocations(data.locations || []);
-      })
-      .catch(() => {});
-  }, []);
 
   useEffect(() => {
     if (!sessionId || cardsHaveExtraction(cards)) return;
@@ -310,9 +294,6 @@ export default function ClientWorkspace() {
           },
         });
 
-        if (userMessage.toLowerCase().includes("map") || userMessage.toLowerCase().includes("ballroom")) {
-          setMapOpen(true);
-        }
         const captionId = agentCaptionId ?? appendCaption("agent", reply, "pending");
         if (!agentCaptionId) agentCaptionId = captionId;
         patchCaption(captionId, { text: reply, reveal: 1, status: "pending" });
@@ -495,19 +476,9 @@ export default function ClientWorkspace() {
               Stop speaking
             </button>
           )}
-          <VenueMapToggleButton open={mapOpen} onToggle={() => setMapOpen((v) => !v)} />
         </main>
       </div>
       {showCardDeck && <AgentCardDeck cards={cards} onSubmit={submitCardMutation} />}
-      <SidePanelVenueMap
-        open={mapOpen}
-        onClose={() => setMapOpen(false)}
-        anchorBottom={composerOpen ? "11.25rem" : "7.5rem"}
-        compiledHtml={publishedMapHtml}
-        locations={publishedLocations}
-        highlights={mapHighlights}
-        onSelectZone={() => synthesizePulse()}
-      />
       <div
         className={`fixed inset-x-0 z-40 flex flex-col items-center pointer-events-none px-4 ${
           composerOpen ? "bottom-[7.25rem]" : "bottom-14"

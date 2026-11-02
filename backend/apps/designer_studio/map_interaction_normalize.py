@@ -34,6 +34,16 @@ def normalize_map_interaction(html: str, css: str, js: str) -> tuple[str, str, s
             "if(p){p.classList.add('hidden');p.setAttribute('aria-hidden','true');}}\n"
         ).strip()
 
+    if "map-popup" in html_out.lower() and "positionPopupNearMarker" not in js_out:
+        from apps.venue_map_studio.map_popup_anchor import (
+            MAP_POPUP_ANCHOR_CSS,
+            MAP_POPUP_ANCHOR_SCRIPT,
+        )
+
+        js_out = (js_out.rstrip() + "\n" + MAP_POPUP_ANCHOR_SCRIPT).strip()
+        if "positionPopupNearMarker" not in css_out and ".map-popup" in css_out.lower():
+            css_out = (css_out.rstrip() + "\n" + MAP_POPUP_ANCHOR_CSS).strip()
+
     return html_out, css_out, js_out
 
 

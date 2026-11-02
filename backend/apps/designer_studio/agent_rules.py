@@ -63,6 +63,20 @@ def hybrid_score(
     return 0.62 * sem + 0.38 * kw
 
 
+def hybrid_query_document_score(query: str, document: str) -> float:
+    """Local semantic + keyword score (same vectors as designer agent rules RAG)."""
+    q = (query or "").strip()
+    doc = (document or "").strip()
+    if not q or not doc:
+        return 0.0
+    q_embed = embed_rule_text(q)
+    q_tokens = set(tokenize(q))
+    sem = cosine(q_embed, embed_rule_text(doc))
+    kw = keyword_score(q_tokens, tokenize(doc))
+    sub = 1.0 if q.lower() in doc.lower() else 0.0
+    return 0.52 * sem + 0.33 * kw + 0.15 * sub
+
+
 def retrieve_relevant_rules(
     designer_id: int,
     query: str,
