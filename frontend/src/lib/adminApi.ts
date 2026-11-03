@@ -318,6 +318,20 @@ export type NegotiationItem = {
   updated_at: string;
 };
 
+/** One line of a negotiation: client, AI agent, an admin, the automatic holding reply, or a takeover marker. */
+export type ConversationMessage = {
+  who: "client" | "agent" | "admin" | "auto" | "system";
+  by: string | null;
+  text: string;
+  at: string;
+};
+
+export type NegotiationConversation = {
+  rfp_id: string;
+  taken_over: boolean;
+  messages: ConversationMessage[];
+};
+
 export type Property = { id: string; name: string; timezone: string; space_count: number };
 export type PropertyInput = { name: string; timezone?: string };
 
@@ -434,6 +448,8 @@ export const releaseNegotiation = (id: string) =>
   request<unknown>(`negotiations/${encodeURIComponent(id)}/release/`, json("POST"));
 export const sendNegotiationMessage = (id: string, text: string) =>
   request<unknown>(`negotiations/${encodeURIComponent(id)}/message/`, json("POST", { text }));
+export const getNegotiationConversation = (id: string) =>
+  request<NegotiationConversation>(`negotiations/${encodeURIComponent(id)}/conversation/`);
 
 // Module 5 — Inventory
 export const listProperties = () => request<Property[]>("inventory/properties/");

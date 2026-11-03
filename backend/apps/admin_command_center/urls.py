@@ -5,6 +5,7 @@ from .views import (
     AuditListView,
     DebateObservatoryView,
     ModuleStubView,
+    NegotiationConversationView,
     NegotiationListView,
     NegotiationMessageView,
     NegotiationReleaseView,
@@ -52,6 +53,7 @@ urlpatterns = [
     path("negotiations/<uuid:pk>/takeover/", NegotiationTakeoverView.as_view()),
     path("negotiations/<uuid:pk>/release/", NegotiationReleaseView.as_view()),
     path("negotiations/<uuid:pk>/message/", NegotiationMessageView.as_view()),
+    path("negotiations/<uuid:pk>/conversation/", NegotiationConversationView.as_view()),
     # Module 6 — occupancy
     path("occupancy/", OccupancyListView.as_view()),
     path("occupancy/upload/", OccupancyUploadView.as_view()),

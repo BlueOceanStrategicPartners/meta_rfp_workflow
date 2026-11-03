@@ -1,6 +1,7 @@
 import pytest
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
+from rest_framework.test import APIClient
 
 from apps.admin_command_center.models import AdminAuditEvent
 from apps.rfp_debate.models import RFPStatus
@@ -89,3 +90,48 @@ def test_release_without_takeover_and_message_limits(admin_client, seeded_rfp):
     admin_client.post(f"{url}/takeover/")
     assert admin_client.post(f"{url}/message/", {"text": "   "}, format="json").status_code == 400
     assert admin_client.post(f"{url}/message/", {"text": "x" * 501}, format="json").status_code == 400
+
+
+@pytest.mark.django_db
+def test_conversation_shows_what_the_client_says_during_takeover(admin_client, admin_user, seeded_rfp):
+    url = f"/api/admin-center/negotiations/{seeded_rfp.id}"
+    admin_client.post(f"{url}/takeover/")
+    APIClient().post(  # the client is a separate, anonymous browser
+        "/api/negotiation/voice-chat/stream/",
+        {"message": "Can you give us a discount?", "rfp_id": str(seeded_rfp.id)},
+        format="json",
+    )
+    admin_client.post(f"{url}/message/", {"text": "We can include AV at no charge."}, format="json")
+
+    body = admin_client.get(f"{url}/conversation/").json()
+    assert body["taken_over"] is True
+    who_said = [(m["who"], m["text"]) for m in body["messages"]]
+    assert ("client", "Can you give us a discount?") in who_said
+    assert ("admin", "We can include AV at no charge.") in who_said
+    assert any(who == "auto" for who, _ in who_said)
+    assert body["messages"][0]["who"] == "system" and "took over" in body["messages"][0]["text"]
+    admin_msg = next(m for m in body["messages"] if m["who"] == "admin")
+    assert admin_msg["by"] == admin_user.email
+
+
+@pytest.mark.django_db
+def test_conversation_includes_normal_ai_turns(admin_client, seeded_rfp):
+    APIClient().post(
+        "/api/negotiation/voice-chat/", {"message": "What rooms do you have?", "rfp_id": str(seeded_rfp.id)}, format="json"
+    )
+    messages = admin_client.get(f"/api/admin-center/negotiations/{seeded_rfp.id}/conversation/").json()["messages"]
+    assert ("client", "What rooms do you have?") in [(m["who"], m["text"]) for m in messages]
+    assert any(m["who"] == "agent" for m in messages)
+
+
+@pytest.mark.django_db
+def test_conversation_includes_streamed_ai_replies_once(admin_client, seeded_rfp):
+    client = APIClient()
+    for _ in range(2):  # both chat routes, same client message
+        client.post("/api/negotiation/voice-chat/stream/", {"message": "Do you have parking?", "rfp_id": str(seeded_rfp.id)}, format="json").getvalue()
+    messages = admin_client.get(f"/api/admin-center/negotiations/{seeded_rfp.id}/conversation/").json()["messages"]
+    whos = [m["who"] for m in messages]
+    assert whos.count("agent") >= 1
+    # every client line is followed by a reply, and nothing is listed twice in a row
+    pairs = list(zip(messages, messages[1:]))
+    assert not any(a["who"] == b["who"] == "client" and a["text"] == b["text"] and a["at"] == b["at"] for a, b in pairs)

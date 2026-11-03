@@ -492,3 +492,71 @@ html[data-theme="light"] .admin-dialog-host [role="dialog"] button:last-child {
     animation-duration: 1.5s;
   }
 }
+
+/* Negotiation conversation (client left; agent / admin / auto replies right) */
+.admin-convo {
+  max-height: 22rem;
+  overflow-y: auto;
+  padding: 0.25rem 0.125rem;
+}
+.admin-convo-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.admin-convo-row {
+  display: flex;
+}
+.admin-convo-row--in {
+  justify-content: flex-start;
+}
+.admin-convo-row--out {
+  justify-content: flex-end;
+}
+.admin-convo-bubble {
+  max-width: min(32rem, 85%);
+  min-width: 0;
+  border: 1px solid var(--admin-line);
+  border-radius: 0.875rem;
+  padding: 0.5rem 0.75rem;
+  background: var(--admin-surface-strong);
+}
+.admin-convo-bubble--client {
+  background: var(--admin-surface);
+}
+.admin-convo-bubble--admin {
+  border-color: rgba(139, 92, 246, 0.55);
+}
+.admin-convo-bubble--auto {
+  border-style: dashed;
+}
+.admin-convo-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  font-size: 11px;
+  color: var(--admin-faint);
+}
+.admin-convo-bubble--admin .admin-convo-meta span {
+  color: #a78bfa;
+}
+html[data-theme="light"] .admin-convo-bubble--admin .admin-convo-meta span {
+  color: #6d28d9;
+}
+.admin-convo-text {
+  margin: 0.125rem 0 0;
+  font-size: 0.875rem;
+  color: var(--admin-fg);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.admin-convo-marker {
+  align-self: center;
+  font-size: 11px;
+  color: var(--admin-faint);
+  text-align: center;
+  padding: 0.125rem 0.5rem;
+}

@@ -1,5 +1,7 @@
-"""Live negotiation monitor: list, human takeover, hand back, operator messages."""
+"""Live negotiation monitor: list, human takeover, hand back, operator messages, conversation."""
 from __future__ import annotations
+
+from datetime import datetime
 
 from apps.admin_command_center import audit
 from apps.admin_command_center.models import AdminAuditEvent
@@ -99,4 +101,75 @@ def send_message(rfp: RFPSubmission, actor, text: str) -> None:
     if rfp.status != RFPStatus.ESCALATED:
         raise AdminConflictError("Take over the conversation before sending messages.")
     broadcast_rfp(str(rfp.id), "agent_utterance", {"text": clean})
+    # Saved as an assistant turn so the AI knows what the person promised after hand back.
+    from apps.negotiation_agent.client_session_memory import record_assistant_reply
+
+    record_assistant_reply(rfp, clean)
+    rfp.save(update_fields=["client_session_json", "updated_at"])
     audit.record(actor, "negotiation.message", "rfp", rfp.id, text=clean)
+
+
+def _when(value: str) -> datetime:
+    """All stored times are UTC; compare to the second (the chat history has no finer precision)."""
+    try:
+        parsed = datetime.fromisoformat(value)
+    except (TypeError, ValueError):
+        return datetime.min
+    return parsed.replace(tzinfo=None, microsecond=0)
+
+
+# Within the same second: a takeover precedes the messages it affects, a hand-back follows them.
+_SAME_SECOND_ORDER = {"takeover": 0, "turn": 1, "release": 2}
+
+
+def conversation(rfp: RFPSubmission) -> dict:
+    """Client / AI / admin messages in order, plus takeover and hand-back markers."""
+    from apps.negotiation_agent.client_session_memory import normalize_session
+    from apps.negotiation_agent.views import HUMAN_TAKEOVER_REPLY
+
+    events = list(
+        AdminAuditEvent.objects.select_related("actor").filter(
+            target_type="rfp",
+            target_id=str(rfp.id),
+            action__in=("negotiation.takeover", "negotiation.release", "negotiation.message"),
+        )
+    )
+    operator_by_text = {
+        (e.payload_json or {}).get("text"): (e.actor.email if e.actor_id else None)
+        for e in events
+        if e.action == "negotiation.message"
+    }
+    messages = []
+    previous = None
+    for turn in normalize_session(rfp.client_session_json).get("transcript", []):
+        key = (turn["role"], turn["text"], turn["at"])
+        if key == previous:
+            continue  # the same turn saved twice by two code paths
+        previous = key
+        text = turn["text"]
+        if turn["role"] == "user":
+            who, by = "client", None
+        elif text in operator_by_text:
+            who, by = "admin", operator_by_text[text]
+        elif text == HUMAN_TAKEOVER_REPLY:
+            who, by = "auto", None
+        else:
+            who, by = "agent", None
+        messages.append({"who": who, "by": by, "text": text, "at": turn["at"], "_order": "turn"})
+    for e in events:
+        if e.action == "negotiation.message":
+            continue
+        name = e.actor.email if e.actor_id else "An admin"
+        text = (
+            f"{name} took over the conversation"
+            if e.action == "negotiation.takeover"
+            else f"{name} handed the conversation back to the AI agent"
+        )
+        order = "takeover" if e.action == "negotiation.takeover" else "release"
+        messages.append({"who": "system", "by": name, "text": text, "at": e.created_at.isoformat(), "_order": order})
+    messages.sort(key=lambda m: (_when(m["at"]), _SAME_SECOND_ORDER[m.pop("_order")]))
+    return {
+        "rfp_id": str(rfp.id),
+        "taken_over": rfp.status == RFPStatus.ESCALATED,
+        "messages": messages,
+    }

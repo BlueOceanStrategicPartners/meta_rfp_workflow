@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import ActivityList from "../../components/admin/ActivityList";
 import AdminConfirm from "../../components/admin/AdminConfirm";
+import ConversationLog from "../../components/admin/ConversationLog";
 import AdminPanel from "../../components/admin/AdminPanel";
 import { IconHeadset, IconRefresh, IconSend } from "../../components/admin/AdminIcons";
 import { useAdminFeedback, useAnnounceError } from "../../components/admin/AdminLayout";
@@ -11,6 +12,7 @@ import StatusChip, { Chip } from "../../components/admin/StatusChip";
 import { usePolling } from "../../hooks/usePolling";
 import {
   errorMessage,
+  getNegotiationConversation,
   listAudit,
   listNegotiations,
   releaseNegotiation,
@@ -90,6 +92,8 @@ function NegotiationDetail({ item, onChanged }: { item: NegotiationItem; onChang
     10_000,
     [item.id],
   );
+  // Faster refresh so what the client says shows up while you're live.
+  const convo = usePolling(() => getNegotiationConversation(item.id), 3_000, [item.id]);
 
   const runAction = async () => {
     if (!confirm) return;
@@ -103,7 +107,7 @@ function NegotiationDetail({ item, onChanged }: { item: NegotiationItem; onChang
         notify("Handed back. The AI agent is replying again.", "success");
       }
       setConfirm(null);
-      await Promise.all([onChanged(), activity.reload()]);
+      await Promise.all([onChanged(), activity.reload(), convo.reload()]);
     } catch (err) {
       setConfirm(null);
       notify(errorMessage(err), "error");
@@ -121,7 +125,7 @@ function NegotiationDetail({ item, onChanged }: { item: NegotiationItem; onChang
       await sendNegotiationMessage(item.id, trimmed);
       setText("");
       notify("Sent. The client will hear it in the agent's voice.", "success");
-      await activity.reload();
+      await Promise.all([activity.reload(), convo.reload()]);
     } catch (err) {
       notify(errorMessage(err, "We couldn't send that message."), "error");
     } finally {
@@ -218,6 +222,26 @@ function NegotiationDetail({ item, onChanged }: { item: NegotiationItem; onChang
             <div className="studio-empty-list">No quote yet for this request.</div>
           )}
         </div>
+      </section>
+
+      <section className="admin-card p-4" aria-labelledby="ng-convo">
+        <h3 id="ng-convo" className="admin-section-title">
+          Conversation
+        </h3>
+        <p className="admin-muted mb-3 mt-0.5 text-xs">
+          Everything the client and the agent have said, newest at the bottom. Updates every few seconds.
+        </p>
+        {convo.data ? (
+          <ConversationLog messages={convo.data.messages} />
+        ) : (
+          <LoadState
+            loading={convo.loading}
+            error={convo.error}
+            onRetry={() => void convo.reload()}
+            errorTitle="We couldn't load the conversation."
+            compact
+          />
+        )}
       </section>
 
       <section className="admin-card p-4" aria-labelledby="ng-message">

@@ -194,6 +194,11 @@ class NegotiationReleaseView(AdminAPIView):
         return Response({"id": str(rfp.id), "status": rfp.status})
 
 
+class NegotiationConversationView(AdminAPIView):
+    def get(self, request, pk):
+        return Response(negotiation_service.conversation(get_object_or_404(RFPSubmission, pk=pk)))
+
+
 class NegotiationMessageView(AdminAPIView):
     def post(self, request, pk):
         rfp = get_object_or_404(RFPSubmission, pk=pk)
