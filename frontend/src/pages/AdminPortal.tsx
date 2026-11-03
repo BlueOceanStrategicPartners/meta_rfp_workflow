@@ -14,6 +14,8 @@ import PricingPage from "./admin/PricingPage";
 import TelemetryPage from "./admin/TelemetryPage";
 
 const TITLE = "Admin Command Center";
+const DEMO_ADMIN_EMAIL = "admin@demo.local";
+const DEMO_ADMIN_PASSWORD = "admin12345";
 
 /** /admin/* — sign-in guard, then the admin layout with nested module routes. */
 export default function AdminPortal() {
@@ -32,9 +34,9 @@ export default function AdminPortal() {
   }
 
   if (!authed) {
-    const submit = async () => {
+    const runSignIn = async (loginEmail: string, loginPassword: string) => {
       if (busy) return;
-      if (!emailInput.trim() || !password) {
+      if (!loginEmail.trim() || !loginPassword) {
         setLoginError("Enter your email and password.");
         return;
       }
@@ -42,7 +44,7 @@ export default function AdminPortal() {
       setLoginError(null);
       setNotice(null);
       try {
-        const ok = await signIn(emailInput, password);
+        const ok = await signIn(loginEmail, loginPassword);
         if (ok) setPassword("");
       } catch (err) {
         setLoginError(err instanceof Error && err.message ? err.message : "Sign-in failed. Please try again.");
@@ -62,7 +64,13 @@ export default function AdminPortal() {
           busy={busy}
           onEmailChange={setEmailInput}
           onPasswordChange={setPassword}
-          onSubmit={submit}
+          onSubmit={() => runSignIn(emailInput, password)}
+          onMockSso={async () => {
+            // Same demo shortcut as the Designer portal: the Microsoft/Google buttons sign in the demo account.
+            setEmailInput(DEMO_ADMIN_EMAIL);
+            setPassword(DEMO_ADMIN_PASSWORD);
+            await runSignIn(DEMO_ADMIN_EMAIL, DEMO_ADMIN_PASSWORD);
+          }}
         />
       </AdminShell>
     );
