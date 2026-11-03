@@ -38,7 +38,12 @@ def _apply_quote_to_cards(rfp: RFPSubmission, quote) -> None:
     }
     rfp.active_ui_cards_json = cards
     rfp.status = RFPStatus.NEGOTIATING
-    rfp.save(update_fields=["active_ui_cards_json", "status", "updated_at"])
+    update_fields = ["active_ui_cards_json", "status", "updated_at"]
+    if not rfp.sla_completed_at:
+        # SLA clock stops when the client first sees a priced package.
+        rfp.sla_completed_at = timezone.now()
+        update_fields.append("sla_completed_at")
+    rfp.save(update_fields=update_fields)
 
 
 def enqueue_debate_pipeline(rfp_id: str) -> None:

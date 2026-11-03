@@ -20,6 +20,14 @@ def _sse(event: str, payload: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(payload)}\n\n"
 
 
+HUMAN_TAKEOVER_REPLY = "A member of our team has joined and will reply shortly."
+
+
+def _is_human_takeover(rfp: RFPSubmission | None) -> bool:
+    """While an admin has taken over (ESCALATED), the assistant stays silent."""
+    return bool(rfp and rfp.status == RFPStatus.ESCALATED)
+
+
 class VoiceAssistantChatView(APIView):
     """Spark-driven assistant text for SeamlessM4T v2 playback (single reply per turn)."""
 
@@ -32,6 +40,8 @@ class VoiceAssistantChatView(APIView):
         rfp = None
         if rfp_id:
             rfp = RFPSubmission.objects.filter(pk=rfp_id).first()
+        if _is_human_takeover(rfp):
+            return Response({"reply": HUMAN_TAKEOVER_REPLY, "human_takeover": True})
         try:
             reply = generate_voice_assistant_reply_for_rfp(
                 message,
@@ -59,6 +69,9 @@ class VoiceAssistantChatStreamView(APIView):
             rfp = RFPSubmission.objects.filter(pk=rfp_id).first()
 
         def event_stream():
+            if _is_human_takeover(rfp):
+                yield _sse("done", {"reply": HUMAN_TAKEOVER_REPLY, "human_takeover": True})
+                return
             try:
                 for item in iter_voice_assistant_stream(
                     message,

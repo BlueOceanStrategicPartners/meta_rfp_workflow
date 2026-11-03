@@ -13,10 +13,24 @@ from apps.core.exceptions import PricingBoundsViolationError
 from apps.inventory.models import HistoricalOccupancy, SpaceInventory, VenueProperty
 from apps.rfp_debate.models import RFPSubmission
 
-from .models import DynamicPricingQuote
-from .rule_fallback import RuleBasedPricingFallbackEngine
+from .models import DynamicPricingQuote, PricingPolicy
+from .rule_fallback import RuleBasedPricingFallbackEngine, enforce_ladder
 
 MODEL_PATH = Path(settings.BASE_DIR) / "artifacts" / "xgboost_pricing.json"
+MODEL_META_PATH = MODEL_PATH.with_suffix(".meta.json")
+MIN_TRAINING_ROWS = 5
+# The model predicts a demand index around 1.0; clamp it so one bad prediction cannot run away.
+DEMAND_INDEX_MIN = 0.8
+DEMAND_INDEX_MAX = 1.5
+FEATURE_COLUMNS = [
+    "days_until_event",
+    "event_duration_days",
+    "avg_historical_occupancy",
+    "avg_adr",
+    "requested_rooms_ratio",
+    "meeting_headcount",
+    "month",
+]
 
 
 def _parse_date(value) -> date | None:
@@ -74,23 +88,19 @@ def _predict_with_xgboost(features: dict) -> tuple[float, dict]:
     if not MODEL_PATH.exists():
         raise PricingBoundsViolationError("Model artifact missing")
 
-    booster = xgb.Booster()
-    booster.load_model(str(MODEL_PATH))
-    row = [[
-        features["days_until_event"],
-        features["event_duration_days"],
-        features["avg_historical_occupancy"],
-        features["avg_adr"],
-        features["requested_rooms_ratio"],
-        features["meeting_headcount"],
-        features["month"],
-    ]]
-    import xgboost as xgb
+    try:
+        import numpy as np
 
-    dmatrix = xgb.DMatrix(row)
-    score = float(booster.predict(dmatrix)[0])
+        booster = xgb.Booster()
+        booster.load_model(str(MODEL_PATH))
+        row = np.array([[float(features[name]) for name in FEATURE_COLUMNS]])
+        dmatrix = xgb.DMatrix(row, feature_names=FEATURE_COLUMNS)
+        score = float(booster.predict(dmatrix)[0])
+    except Exception as exc:  # corrupt artifact / feature mismatch -> rule-based fallback
+        raise PricingBoundsViolationError(f"Model prediction failed: {exc}") from exc
     if math.isnan(score) or score <= 0:
         raise PricingBoundsViolationError("Invalid model output")
+    score = min(max(score, DEMAND_INDEX_MIN), DEMAND_INDEX_MAX)
     shap = {
         "top_features": [
             {"name": "avg_historical_occupancy", "impact": features["avg_historical_occupancy"]},
@@ -105,6 +115,7 @@ def compute_dynamic_quote(rfp: RFPSubmission) -> DynamicPricingQuote:
     if not prop:
         prop = VenueProperty.objects.create(name="Default Property")
     features = build_feature_vector(rfp, prop.id)
+    policy = PricingPolicy.get_solo()
     used_fallback = False
     try:
         if HistoricalOccupancy.objects.filter(property=prop).count() == 0:
@@ -112,23 +123,28 @@ def compute_dynamic_quote(rfp: RFPSubmission) -> DynamicPricingQuote:
         demand_score, shap_json = _predict_with_xgboost(features)
     except PricingBoundsViolationError:
         used_fallback = True
-        demand_score, prices = RuleBasedPricingFallbackEngine.quote(prop, features)
+        demand_score, prices = RuleBasedPricingFallbackEngine.quote(prop, features, policy)
         shap_json = {"fallback": True, "demand_score": demand_score}
         floor = prices["floor"]
         target = prices["target"]
         anchor = prices["anchor"]
     else:
-        base = Decimal(str(features["avg_adr"])) * Decimal(str(features["event_duration_days"]))
-        multiplier = Decimal(str(max(demand_score, 0.5)))
-        margin = Decimal(str(settings.WALK_AWAY_FLOOR_MARGIN_PCT))
-        floor = base * (Decimal("1") + margin)
-        target = base * multiplier * Decimal("1.08")
-        anchor = target * Decimal("1.12")
+        base = (
+            Decimal(str(features["avg_adr"]))
+            * Decimal(str(features["event_duration_days"]))
+            * Decimal(str(policy.season(features.get("month"))))
+            * Decimal(str(policy.event_multiplier))
+        )
+        multiplier = Decimal(str(demand_score))
+        floor = base * (Decimal("1") + Decimal(str(policy.walk_away_floor_margin_pct)))
+        target = base * multiplier * (Decimal("1") + Decimal(str(policy.target_markup_pct)))
+        anchor = target * (Decimal("1") + Decimal(str(policy.anchor_markup_pct)))
         space_floor = (
             SpaceInventory.objects.filter(property=prop).order_by("base_floor_cost").first()
         )
         if space_floor and floor < space_floor.base_floor_cost:
             floor = space_floor.base_floor_cost
+        floor, target, anchor = enforce_ladder(floor, target, anchor)
 
     quote = DynamicPricingQuote.objects.create(
         rfp=rfp,
@@ -148,8 +164,9 @@ def train_and_save_model(property_id) -> str:
     import xgboost as xgb
 
     rows = HistoricalOccupancy.objects.filter(property_id=property_id)
-    if rows.count() < 5:
+    if rows.count() < MIN_TRAINING_ROWS:
         return "skipped_insufficient_data"
+    mean_revpar = float(rows.aggregate(m=models.Avg("revpar"))["m"] or 0) or 1.0
     records = []
     for row in rows:
         records.append(
@@ -161,21 +178,33 @@ def train_and_save_model(property_id) -> str:
                 "requested_rooms_ratio": 0.5,
                 "meeting_headcount": 200,
                 "month": row.target_date.month,
-                "label": float(row.revpar),
+                # Demand index (~1.0): RevPAR relative to the property average, not raw currency.
+                "label": float(row.revpar) / mean_revpar,
             }
         )
     df = pd.DataFrame(records)
-    feature_cols = [
-        "days_until_event",
-        "event_duration_days",
-        "avg_historical_occupancy",
-        "avg_adr",
-        "requested_rooms_ratio",
-        "meeting_headcount",
-        "month",
-    ]
+    feature_cols = FEATURE_COLUMNS
     dtrain = xgb.DMatrix(df[feature_cols], label=df["label"])
     model = xgb.train({"objective": "reg:squarederror"}, dtrain, num_boost_round=10)
     MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
     model.save_model(str(MODEL_PATH))
+    MODEL_META_PATH.write_text(
+        json.dumps({"trained_at": datetime.now().astimezone().isoformat(), "rows": len(records)}),
+        encoding="utf-8",
+    )
     return str(MODEL_PATH)
+
+
+def model_status() -> dict:
+    trained_at = None
+    if MODEL_META_PATH.exists():
+        try:
+            trained_at = json.loads(MODEL_META_PATH.read_text(encoding="utf-8")).get("trained_at")
+        except (OSError, ValueError):
+            trained_at = None
+    return {
+        "artifact_exists": MODEL_PATH.exists(),
+        "trained_at": trained_at,
+        "occupancy_rows": HistoricalOccupancy.objects.count(),
+        "min_rows_required": MIN_TRAINING_ROWS,
+    }
