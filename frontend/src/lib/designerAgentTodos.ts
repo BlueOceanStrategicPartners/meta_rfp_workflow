@@ -19,7 +19,8 @@ export function isExecutionTodoList(todos: AgentWorkPlanStep[]): boolean {
 
 /** True when the todo list should show an in-progress spinner (not a completed checklist). */
 export function todosIndicateActiveRun(todos: AgentWorkPlanStep[]): boolean {
-  if (todos.length === 0 || isPlanningOnlyTodos(todos)) return true;
+  if (todos.length === 0) return false;
+  if (isPlanningOnlyTodos(todos)) return true;
   return todos.some((t) => t.status === "active" || t.status === "pending");
 }
 

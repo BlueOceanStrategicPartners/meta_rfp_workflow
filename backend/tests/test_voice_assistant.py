@@ -6,7 +6,7 @@ def test_voice_assistant_chat(api_client, settings):
     settings.USE_FIXTURE_DEBATE = True
     response = api_client.post(
         "/api/negotiation/voice-chat/",
-        {"message": "We need the grand ballroom on the map"},
+        {"message": "We need the grand ballroom for about 200 guests"},
         format="json",
     )
     assert response.status_code == 200
@@ -18,7 +18,7 @@ def test_voice_assistant_chat_stream(api_client, settings):
     settings.USE_FIXTURE_DEBATE = True
     response = api_client.post(
         "/api/negotiation/voice-chat/stream/",
-        {"message": "We need the grand ballroom on the map"},
+        {"message": "We need the grand ballroom for about 200 guests"},
         format="json",
     )
     assert response.status_code == 200

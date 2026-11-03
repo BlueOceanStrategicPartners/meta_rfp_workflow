@@ -11,7 +11,7 @@ export type PreviewAutomationReport = {
   error?: string;
   duration_ms: number;
   viewport: { w: number; h: number };
-  scroll: { docHeight: number; canScroll: boolean };
+  scroll: { docHeight: number; canScroll: boolean; trailingGapPx?: number; contentBottom?: number };
   elements: {
     heroVisible: boolean;
     ctaVisible: boolean;
@@ -47,8 +47,36 @@ const PROBE_SCRIPT = `
   var popup = document.getElementById("map-popup");
   var popupOpen = popup && visible(popup);
   var zones = document.querySelectorAll("[data-location-id], .zone, button.zone");
+  function lastContentBottom() {
+    var selectors = "section, footer, header, main, .proposal-cta, .venue-map-proposal, h1";
+    var nodes = body.querySelectorAll(selectors);
+    var maxB = 0;
+    for (var k = 0; k < nodes.length; k++) {
+      var node = nodes[k];
+      if (!visible(node)) continue;
+      var rect = node.getBoundingClientRect();
+      var bottom = rect.bottom + window.scrollY;
+      if (bottom > maxB) maxB = bottom;
+    }
+    if (maxB < 8) {
+      var all = body.querySelectorAll("*");
+      for (var j = 0; j < all.length; j++) {
+        var el = all[j];
+        if (!visible(el)) continue;
+        var t = (el.textContent || "").trim();
+        if (t.length < 2 && !el.querySelector("img,svg,canvas,video")) continue;
+        var rb = el.getBoundingClientRect().bottom + window.scrollY;
+        if (rb > maxB) maxB = rb;
+      }
+    }
+    return maxB;
+  }
+  var contentBottom = lastContentBottom();
+  var trailingGapPx = Math.max(0, Math.round(docH - contentBottom));
   return {
     docHeight: docH,
+    contentBottom: contentBottom,
+    trailingGapPx: trailingGapPx,
     viewportW: window.innerWidth,
     viewportH: window.innerHeight,
     heroVisible: visible(hero),
@@ -203,6 +231,8 @@ export async function runPreviewPanelAutomation(
       h: Number(base.viewportH) || 900,
     };
     const docHeight = Number(base.docHeight) || 0;
+    const trailingGapPx = Number(base.trailingGapPx) || 0;
+    const contentBottom = Number(base.contentBottom) || 0;
     const elements = {
       heroVisible: Boolean(base.heroVisible),
       ctaVisible: Boolean(base.ctaVisible),
@@ -260,7 +290,7 @@ export async function runPreviewPanelAutomation(
       ok,
       duration_ms: Math.round(performance.now() - started),
       viewport,
-      scroll: { docHeight, canScroll: docHeight > viewport.h + 40 },
+      scroll: { docHeight, canScroll: docHeight > viewport.h + 40, trailingGapPx, contentBottom },
       elements,
       interactions,
     };

@@ -48,9 +48,16 @@ def repair_search_hints(issues: list[str]) -> list[dict[str, str]]:
         if "date" in lower or "iso" in lower or "mm/dd" in lower:
             add("html", "event_dates")
             add("html", "2026-")
+        if "href" in lower or "same-domain" in lower or "rfp engine" in lower or "/client" in lower:
+            add("html", "href=")
+            add("html", "href=\"#")
         if "unbalanced" in lower or "<section" in lower or "css" in lower or "style" in lower:
             add("html", "proposal_section", "style")
             add("html", "html_element", "style")
+        if "trailing whitespace" in lower or "min-h-screen" in lower or "spacer" in lower:
+            add("html", "min-h-screen")
+            add("html", "pb-")
+            add("html", "footer")
 
     if not hints:
         add("html", "{{")
@@ -77,6 +84,9 @@ def _issue_pool_queries(issue: str) -> list[tuple[str, str, str]]:
         push("html", "proposal_section", token)
     if "map" in lower or "venue" in lower:
         push("html", "proposal_section", "venue map")
+    if "trailing whitespace" in lower or "min-h-screen" in lower or "spacer" in lower:
+        push("html", "proposal_section", "min-h-screen")
+        push("html", "proposal_section", "footer")
     if not out:
         snippet = re.sub(r"\s+", " ", issue).strip()[:100]
         push("html", "proposal_section", snippet or "proposal")

@@ -289,6 +289,16 @@ export function IconClose() {
   );
 }
 
+export function IconTargetPick() {
+  return (
+    <svg width={ICON_SIZE} height={ICON_SIZE} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={ICON_STROKE} aria-hidden>
+      <circle cx="12" cy="12" r="8" />
+      <circle cx="12" cy="12" r="2.5" fill="currentColor" stroke="none" />
+      <path d="M12 2v3M12 19v3M2 12h3M19 12h3" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 export function IconUnlinkMap() {
   return (
     <svg width={ICON_SIZE} height={ICON_SIZE} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={ICON_STROKE} aria-hidden>

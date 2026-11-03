@@ -13,8 +13,12 @@ function injectScrollPortStyle(doc: Document) {
   doc.head.appendChild(el);
 }
 
+const FLATTENED_FLAG = "data-studio-scroll-flattened";
+
 /** Expand nested scroll containers so the studio shell owns scrolling (no white iframe tracks). */
 function flattenInternalScrollContainers(doc: Document) {
+  const root = doc.documentElement;
+  if (root.getAttribute(FLATTENED_FLAG) === "1") return;
   const win = doc.defaultView;
   if (!win) return;
   const nodes = doc.querySelectorAll("body, body *");
@@ -32,6 +36,7 @@ function flattenInternalScrollContainers(doc: Document) {
       }
     }
   });
+  root.setAttribute(FLATTENED_FLAG, "1");
 }
 
 function measurePreviewHeight(doc: Document): number {
@@ -48,10 +53,13 @@ function measurePreviewHeight(doc: Document): number {
   return Math.ceil(max);
 }
 
+const MAX_PREVIEW_IFRAME_HEIGHT_PX = 24_000;
+
 function syncPreviewIframe(doc: Document): number {
   injectScrollPortStyle(doc);
   flattenInternalScrollContainers(doc);
-  return measurePreviewHeight(doc);
+  const measured = measurePreviewHeight(doc);
+  return Math.min(measured, MAX_PREVIEW_IFRAME_HEIGHT_PX);
 }
 
 /** Parent scrolls; iframe grows to content (avoids white OS scroll tracks inside srcDoc). */
@@ -68,20 +76,34 @@ export function useLivePreviewIframeScrollPort(
 
     let observer: ResizeObserver | undefined;
     let raf = 0;
+    let debounceTimer = 0;
+    let lastHeight = 0;
 
     const sync = () => {
-      const doc = iframe.contentDocument;
-      if (!doc) return;
-      const next = syncPreviewIframe(doc);
-      setHeight(next);
+      try {
+        const doc = iframe.contentDocument;
+        if (!doc) return;
+        const next = syncPreviewIframe(doc);
+        if (Math.abs(next - lastHeight) < 2) return;
+        lastHeight = next;
+        setHeight(next);
+      } catch (err) {
+        if (import.meta.env.DEV) {
+          console.warn("[designer] preview iframe height sync failed", err);
+        }
+      }
     };
 
     const scheduleSync = () => {
-      if (raf) cancelAnimationFrame(raf);
-      raf = requestAnimationFrame(() => {
-        raf = 0;
-        sync();
-      });
+      if (debounceTimer) window.clearTimeout(debounceTimer);
+      debounceTimer = window.setTimeout(() => {
+        debounceTimer = 0;
+        if (raf) cancelAnimationFrame(raf);
+        raf = requestAnimationFrame(() => {
+          raf = 0;
+          sync();
+        });
+      }, 80);
     };
 
     const onLoad = () => {
@@ -105,6 +127,7 @@ export function useLivePreviewIframeScrollPort(
       iframe.removeEventListener("load", onLoad);
       observer?.disconnect();
       if (raf) cancelAnimationFrame(raf);
+      if (debounceTimer) window.clearTimeout(debounceTimer);
     };
   }, [iframeRef, srcDoc]);
 

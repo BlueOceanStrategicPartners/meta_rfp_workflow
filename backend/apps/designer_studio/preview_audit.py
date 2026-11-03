@@ -4,6 +4,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from .layout_spacing_validation import collect_trailing_whitespace_issues
 from .services import compile_template
 
 
@@ -84,6 +85,15 @@ def audit_compiled_proposal_preview(html: str, css: str, js: str = "") -> list[P
             )
         )
 
+    for message in collect_trailing_whitespace_issues(html or "", css or ""):
+        findings.append(
+            PreviewFinding(
+                "trailing_whitespace",
+                message,
+                severity="error",
+            )
+        )
+
     return findings
 
 
@@ -95,6 +105,7 @@ def format_preview_audit_for_agent(findings: list[PreviewFinding]) -> str:
         lines.append(f"- [{f.severity}] {f.code}: {f.message}")
     lines.append(
         "Treat these as bugs to fix in html/css/js. Map popups must stay hidden until zone click; "
-        "proposal hero/CTA must remain visible."
+        "proposal hero/CTA must remain visible. Remove trailing dead space — the page should end "
+        "at the footer or last section without a large empty band below."
     )
     return "\n".join(lines)

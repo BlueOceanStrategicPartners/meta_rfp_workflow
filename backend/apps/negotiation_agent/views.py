@@ -14,6 +14,7 @@ from apps.inventory.locking import lock_zone_for_booking
 from apps.rfp_debate.models import RFPStatus, RFPSubmission
 
 from .voice_assistant import generate_voice_assistant_reply_for_rfp, iter_voice_assistant_stream
+from .availability_inquiry import try_availability_response
 
 
 def _sse(event: str, payload: dict) -> str:
@@ -43,6 +44,23 @@ class VoiceAssistantChatView(APIView):
         if _is_human_takeover(rfp):
             return Response({"reply": HUMAN_TAKEOVER_REPLY, "human_takeover": True})
         try:
+            if rfp and message.strip():
+                from .client_session_memory import record_voice_turn
+
+                record_voice_turn(rfp, message.strip())
+                rfp.save(update_fields=["client_session_json", "updated_at"])
+            avail = try_availability_response(message)
+            if avail:
+                spoken, ui = avail
+                from .client_session_memory import record_assistant_reply
+
+                if rfp:
+                    record_assistant_reply(rfp, spoken)
+                    rfp.save(update_fields=["client_session_json", "updated_at"])
+                reply_payload = {"reply": spoken}
+                if ui:
+                    reply_payload["ui_component"] = ui
+                return Response(reply_payload)
             reply = generate_voice_assistant_reply_for_rfp(
                 message,
                 rfp=rfp,

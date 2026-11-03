@@ -1,5 +1,5 @@
 import { getDesignerStreamPostHeaders, resolveDevStreamUrl } from "./apiClient";
-import { designerChat, type ChatMessage, type DesignerChatResponse, type PreviewAutomationReport } from "./designerApi";
+import { designerChat, type ChatMessage, type ChatPreviewTargetAttachment, type DesignerChatResponse, type PreviewAutomationReport } from "./designerApi";
 import { normalizeDesignerProgressLabel } from "./designerUserLabels";
 
 export type AgentToolStep = {
@@ -49,6 +49,9 @@ export type DesignerChatRequestBody = {
   include_preview_audit?: boolean;
   preview_automation_report?: PreviewAutomationReport | null;
   preview_automation_depth?: number;
+  /** User-visible chat text (preview target sent separately as preview_target). */
+  display_message?: string;
+  preview_target?: ChatPreviewTargetAttachment | null;
 };
 
 function normalizeSseText(text: string): string {

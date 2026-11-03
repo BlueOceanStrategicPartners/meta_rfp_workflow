@@ -3,6 +3,7 @@ import ParticleConstellation from "../components/canvas3d/ParticleConstellation"
 import CentralVoiceOrb from "../components/canvas3d/CentralVoiceOrb";
 import ComposerDock from "../components/composer/ComposerDock";
 import WindowDragAndDropOverlay from "../components/composer/WindowDragAndDropOverlay";
+import AgentAvailabilityTable from "../components/generative_ui/AgentAvailabilityTable";
 import AgentCardDeck from "../components/generative_ui/AgentCardDeck";
 import ProposalTemplateRenderer from "../components/generative_ui/ProposalTemplateRenderer";
 import VoiceAgentSubtitles, { type CaptionLine } from "../components/voice/VoiceAgentSubtitles";
@@ -10,7 +11,9 @@ import { useVoiceOrbAudio } from "../hooks/useVoiceOrbAudio";
 import { useMuseVoiceTranscribe } from "../hooks/useMuseVoiceTranscribe";
 import { useBidirectionalAgentUI } from "../hooks/useBidirectionalAgentUI";
 import { unlockBrowserAudio, primeAudioSync, useSeamlessM4TV2 } from "../hooks/useSeamlessM4TV2";
-import { cardsHaveExtraction, quickVoiceAck, shouldStartAutonomousPipeline } from "../lib/rfpFlow";
+import type { AgentUiComponent } from "../lib/agentUiComponents";
+import { useClientCardDeckVisibility } from "../hooks/useClientCardDeckVisibility";
+import { cardsHaveIdentifiedFields, messageIsSocialGreeting, quickVoiceAck, shouldEnsureRfpSession, shouldRunDebateExtraction } from "../lib/rfpFlow";
 import { createRfpSession, fetchRfpCards, waitForRfpCards } from "../lib/rfpApi";
 import { streamAssistantReply } from "../lib/voiceChatStream";
 
@@ -30,6 +33,8 @@ export default function ClientWorkspace() {
   const [thinking, setThinking] = useState(false);
   const [progressText, setProgressText] = useState<string | null>(null);
   const [captions, setCaptions] = useState<CaptionLine[]>([]);
+  const [agentUiComponent, setAgentUiComponent] = useState<AgentUiComponent | null>(null);
+  const [selectedAvailabilityIso, setSelectedAvailabilityIso] = useState<string | null>(null);
   const lastSpokenRef = useRef<{ text: string; at: number } | null>(null);
   const pendingSpeechRef = useRef<{ text: string; captionId: string } | null>(null);
   const activeCaptionRef = useRef<string | null>(null);
@@ -61,7 +66,7 @@ export default function ClientWorkspace() {
   }, []);
 
   const finishCaptionReveal = useCallback(
-    (captionId: string, durationMs = 1200) => {
+    (captionId: string, durationMs = 800) => {
       const start = performance.now();
       const tick = (now: number) => {
         const t = Math.min(1, (now - start) / durationMs);
@@ -74,7 +79,10 @@ export default function ClientWorkspace() {
   );
 
   const { speak, stopSpeaking } = useSeamlessM4TV2(
-    () => setAgentSpeaking(true),
+    () => {
+      setAgentSpeaking(true);
+      setThinking(false);
+    },
     () => {
       setAgentSpeaking(false);
       if (activeCaptionRef.current) {
@@ -181,7 +189,7 @@ export default function ClientWorkspace() {
     [appendCaption, speakOnce],
   );
 
-  const { cards, proposalHtml, debateRings, error, submitCardMutation, setCards } =
+  const { cards, proposalHtml, debateRings, error, submitCardMutation, markCardSaving, clientSession, cardSaveState, cardValidationError, setCards } =
     useBidirectionalAgentUI(sessionId, handleAgentUtterance);
 
   const ensureSession = useCallback(
@@ -193,7 +201,7 @@ export default function ClientWorkspace() {
       onProgress?.("Checking your RFP session…");
       if (sessionIdRef.current) {
         const hydrated = await waitForRfpCards(sessionIdRef.current);
-        if (cardsHaveExtraction(hydrated)) {
+        if (cardsHaveIdentifiedFields(hydrated)) {
           setCards(hydrated);
         }
         return { id: sessionIdRef.current, created: false };
@@ -204,12 +212,12 @@ export default function ClientWorkspace() {
       setSessionId(created.id);
       sessionIdRef.current = created.id;
       if (runDebate) {
-        if (cardsHaveExtraction(created.cards)) {
+        if (cardsHaveIdentifiedFields(created.cards)) {
           setCards(created.cards);
         } else {
           onProgress?.("Pulling room block, meeting space, and pricing cards…");
           const hydrated = await waitForRfpCards(created.id);
-          if (cardsHaveExtraction(hydrated)) {
+          if (cardsHaveIdentifiedFields(hydrated)) {
             setCards(hydrated);
           }
         }
@@ -225,10 +233,10 @@ export default function ClientWorkspace() {
   );
 
   useEffect(() => {
-    if (!sessionId || cardsHaveExtraction(cards)) return;
+    if (!sessionId || cardsHaveIdentifiedFields(cards)) return;
     let cancelled = false;
     void waitForRfpCards(sessionId).then((next) => {
-      if (!cancelled && cardsHaveExtraction(next)) {
+      if (!cancelled && cardsHaveIdentifiedFields(next)) {
         setCards(next);
       }
     });
@@ -243,7 +251,12 @@ export default function ClientWorkspace() {
         appendCaption("user", userMessage);
       }
       setThinking(true);
-      setProgressText(quickVoiceAck(userMessage));
+      if (!messageIsSocialGreeting(userMessage)) {
+        setProgressText(quickVoiceAck(userMessage));
+      } else {
+        setProgressText(null);
+      }
+      setAgentUiComponent(null);
       let agentCaptionId: string | null = null;
       let streamedText = "";
 
@@ -257,9 +270,7 @@ export default function ClientWorkspace() {
       };
 
       try {
-        const startPipeline =
-          shouldStartAutonomousPipeline(userMessage) &&
-          (!sessionIdRef.current || cardsHaveExtraction(cards));
+        const startPipeline = shouldRunDebateExtraction(userMessage) && !sessionIdRef.current;
 
         if (startPipeline) {
           touchAgentLine(quickVoiceAck(userMessage));
@@ -271,28 +282,40 @@ export default function ClientWorkspace() {
             }
             return;
           }
-          const line =
-            session.voiceIntro ||
-            "I've opened a draft summary on the right. Review it, then say approve or negotiate.";
-          touchAgentLine(line, "pending");
-          await speakOnce(line, agentCaptionId!, { mandatory: true });
-          return;
+          if (session.created && session.voiceIntro) {
+            touchAgentLine(session.voiceIntro, "pending");
+            await speakOnce(session.voiceIntro, agentCaptionId!, { mandatory: true });
+            return;
+          }
         }
 
-        const reply = await streamAssistantReply(userMessage, sessionIdRef.current, {
+        if (!sessionIdRef.current && shouldEnsureRfpSession(userMessage)) {
+          const created = await createRfpSession(userMessage.slice(0, 5000), false);
+          if (created.ok) {
+            setSessionId(created.id);
+            sessionIdRef.current = created.id;
+            if (cardsHaveIdentifiedFields(created.cards)) setCards(created.cards);
+          }
+        }
+
+        const turn = await streamAssistantReply(userMessage, sessionIdRef.current, {
           onStatus: (text) => touchAgentLine(text),
           onToken: (token) => {
             streamedText += token;
             touchAgentLine(streamedText.trim());
           },
-          onDone: (finalReply) => {
+          onDone: (finalReply, ui) => {
             streamedText = finalReply;
             touchAgentLine(finalReply, "pending");
+            if (ui) setAgentUiComponent(ui);
           },
           onError: (message) => {
             touchAgentLine(message, "pending");
           },
         });
+
+        const reply = turn.reply;
+        if (turn.uiComponent) setAgentUiComponent(turn.uiComponent);
 
         const captionId = agentCaptionId ?? appendCaption("agent", reply, "pending");
         if (!agentCaptionId) agentCaptionId = captionId;
@@ -302,7 +325,7 @@ export default function ClientWorkspace() {
         const sid = sessionIdRef.current;
         if (sid) {
           const fresh = await fetchRfpCards(sid);
-          if (Object.keys(fresh).length) setCards(fresh);
+          if (cardsHaveIdentifiedFields(fresh)) setCards(fresh);
         }
       } finally {
         setThinking(false);
@@ -323,9 +346,6 @@ export default function ClientWorkspace() {
         patchCaption(liveUserCaptionRef.current, { text, reveal: 1, status: "speaking" });
       }
     },
-    onTurnPending: () => {
-      setStatusHint("Still listening — pause briefly when you're done speaking.");
-    },
     onFinalTranscript: (text) => {
       setStatusHint(null);
       const trimmed = text.trim();
@@ -342,6 +362,7 @@ export default function ClientWorkspace() {
       } else {
         appendCaption("user", trimmed);
       }
+      setThinking(true);
       primeAudioSync();
       pauseListeningRef.current();
       void unlockBrowserAudio().then(() =>
@@ -386,10 +407,10 @@ export default function ClientWorkspace() {
       if (created.ok) {
         setSessionId(created.id);
         sessionIdRef.current = created.id;
-        const deck = cardsHaveExtraction(created.cards)
+        const deck = cardsHaveIdentifiedFields(created.cards)
           ? created.cards
           : await waitForRfpCards(created.id);
-        if (cardsHaveExtraction(deck)) {
+        if (cardsHaveIdentifiedFields(deck)) {
           setCards(deck);
         }
         lastSpokenRef.current = null;
@@ -416,7 +437,11 @@ export default function ClientWorkspace() {
     [askAssistant, synthesizePulse],
   );
 
-  const showCardDeck = sessionId && cardsHaveExtraction(cards);
+  const { showCardDeck, dockSideForGenerative } = useClientCardDeckVisibility(
+    sessionId,
+    cards,
+    agentUiComponent,
+  );
 
   const subtitleBandActive =
     captions.length > 0 || thinking || agentSpeaking || progressText != null;
@@ -451,6 +476,7 @@ export default function ClientWorkspace() {
             levels={micLevels}
             debateRings={debateRings}
             agentSpeaking={agentSpeaking}
+            thinking={thinking}
             voiceMode={voiceMode}
             micPhase={micPhase}
             onVoiceToggle={toggleVoiceMode}
@@ -478,7 +504,33 @@ export default function ClientWorkspace() {
           )}
         </main>
       </div>
-      {showCardDeck && <AgentCardDeck cards={cards} onSubmit={submitCardMutation} />}
+      {showCardDeck && (
+        <AgentCardDeck
+          cards={cards}
+          clientSession={clientSession}
+          saveState={cardSaveState}
+          cardError={cardValidationError}
+          onPatch={submitCardMutation}
+          onMarkSaving={markCardSaving}
+        />
+      )}
+      {agentUiComponent?.type === "availability_table" ? (
+        <AgentAvailabilityTable
+          dockSide={dockSideForGenerative}
+          title={agentUiComponent.title}
+          caption={agentUiComponent.caption}
+          columns={agentUiComponent.columns}
+          rows={agentUiComponent.rows}
+          highlights={agentUiComponent.highlights}
+          selectedDateIso={selectedAvailabilityIso}
+          onSelectRow={(row) => {
+            const iso = String(row.date_iso || "");
+            const label = String(row.date_label || iso);
+            setSelectedAvailabilityIso(iso);
+            void askAssistant(`We would like to arrive on ${label}. Please hold that date.`);
+          }}
+        />
+      ) : null}
       <div
         className={`fixed inset-x-0 z-40 flex flex-col items-center pointer-events-none px-4 ${
           composerOpen ? "bottom-[7.25rem]" : "bottom-14"
@@ -493,23 +545,23 @@ export default function ClientWorkspace() {
           />
           <p className="text-xs text-center max-w-md">
             {isMicLive ? (
-              <span className="text-emerald-300 font-medium">● Listening · local ASR</span>
+              <span className="client-voice-status client-voice-status--active font-medium">● Listening · local ASR</span>
             ) : micPhase === "paused" && voiceMode ? (
-              <span className="text-emerald-200/80 font-medium">● Voice mode · paused for reply</span>
+              <span className="client-voice-status font-medium">● Voice mode · paused for reply</span>
             ) : micPhase === "connecting" && voiceMode ? (
-              <span className="text-emerald-200/80 font-medium">● Loading Whisper…</span>
+              <span className="client-voice-status font-medium">● Loading Whisper…</span>
             ) : voiceMode ? (
-              <span className="text-emerald-200/80 font-medium">● Voice mode on</span>
+              <span className="client-voice-status font-medium">● Voice mode on</span>
             ) : agentSpeaking ? (
-              <span className="text-cyan-300 animate-pulse font-medium">● Speaking</span>
+              <span className="client-voice-status client-voice-status--speaking animate-pulse font-medium">● Speaking</span>
             ) : (
-              <span className="text-white/40">Tap the orb for voice · Whisper</span>
+              <span className="client-hint-muted">Tap the orb for voice · Whisper</span>
             )}
           </p>
           {statusHint && !agentSpeaking && (
-            <p className="text-xs text-amber-200/90 text-center max-w-md">{statusHint}</p>
+            <p className="client-status-hint text-center text-xs max-w-md">{statusHint}</p>
           )}
-          {error && <p className="text-xs text-orange-300/90 text-center max-w-md">{error}</p>}
+          {error && <p className="client-status-error text-center text-xs max-w-md">{error}</p>}
         </div>
       </div>
       <ComposerDock

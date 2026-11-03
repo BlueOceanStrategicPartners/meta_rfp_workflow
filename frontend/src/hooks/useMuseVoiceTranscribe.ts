@@ -12,8 +12,8 @@ import {
 } from "../lib/audioEngine";
 import { waitForAsrWorkerReady } from "../lib/asrStatus";
 
-/** Wait after ASR end-of-turn before sending to the assistant (allows mid-sentence pauses). */
-const TURN_COMMIT_DEBOUNCE_MS = 2000;
+/** End-of-turn delay before sending to the assistant (~0.9s is typical for voice UX). */
+const TURN_COMMIT_DEBOUNCE_MS = 900;
 
 export type MuseTranscribeState = "idle" | "connecting" | "listening" | "error";
 export type MicPhase = "idle" | "connecting" | "live" | "paused" | "error";

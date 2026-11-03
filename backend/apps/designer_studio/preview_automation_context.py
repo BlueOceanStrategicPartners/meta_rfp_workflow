@@ -66,9 +66,15 @@ def format_preview_automation_for_agent(report: dict[str, Any] | None) -> str:
         lines.append(f"- viewport: {vp.get('w')}×{vp.get('h')}")
     scroll = report.get("scroll") or {}
     if scroll:
+        gap = scroll.get("trailingGapPx")
         lines.append(
             f"- document height: {scroll.get('docHeight')} · can_scroll: {scroll.get('canScroll')}"
         )
+        if gap is not None:
+            lines.append(
+                f"- trailing gap below content: {gap}px "
+                f"(content_bottom: {scroll.get('contentBottom', '—')})"
+            )
     elements = report.get("elements") or {}
     if elements:
         lines.append(

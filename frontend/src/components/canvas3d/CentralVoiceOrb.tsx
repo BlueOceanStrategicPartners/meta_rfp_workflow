@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 
 import type { MicPhase } from "../../hooks/useMuseVoiceTranscribe";
+import { useAppShell } from "../../context/AppShellContext";
+import ThinkingDotsLine from "../voice/ThinkingDotsLine";
 
 const ORBIT_RINGS = [1, 2, 3, 4] as const;
 const RING_BASE_PX = 216;
@@ -19,22 +21,45 @@ function ringSegment(ring: number): number {
 }
 
 /** Inner rings rest/peak high; outer rings stay low even at peak */
-function ringOpacitySegment(ring: number): { rest: number; peak: number } {
+function ringOpacitySegment(ring: number, light: boolean): { rest: number; peak: number } {
   const t = ringSegment(ring);
+  if (light) {
+    return {
+      rest: 0.58 - t * 0.34,
+      peak: 0.86 - t * 0.48,
+    };
+  }
   return {
     rest: 0.54 - t * 0.46,
     peak: 0.8 - t * 0.64,
   };
 }
 
+/** Light mode: arc blue (inner) blended into slate–navy (outer). */
+function lightRingStrokeRgb(ring: number): string {
+  const t = ringSegment(ring);
+  const r = Math.round(29 + t * 42);
+  const g = Math.round(78 + t * 7);
+  const b = Math.round(216 - t * 111);
+  return `${r}, ${g}, ${b}`;
+}
+
 function ringStrokeColor(
   ring: number,
-  opts: { debate: boolean; micLive: boolean; voiceMode: boolean },
+  opts: { debate: boolean; micLive: boolean; voiceMode: boolean; light: boolean },
 ): string {
   const t = ringSegment(ring);
-  const innerAlpha = 0.48;
-  const outerAlpha = 0.14;
+  const innerAlpha = opts.light ? 0.55 : 0.48;
+  const outerAlpha = opts.light ? 0.22 : 0.14;
   const alpha = innerAlpha - t * (innerAlpha - outerAlpha);
+
+  if (opts.light) {
+    const rgb = lightRingStrokeRgb(ring);
+    if (opts.debate) return `rgba(180, 120, 6, ${alpha * 0.9})`;
+    if (opts.micLive) return `rgba(4, 120, 87, ${alpha * 0.95})`;
+    if (opts.voiceMode) return `rgba(${rgb}, ${alpha * 0.92})`;
+    return `rgba(${rgb}, ${alpha})`;
+  }
 
   if (opts.debate) return `rgba(251, 191, 36, ${alpha * 0.95})`;
   if (opts.micLive) return `rgba(52, 211, 153, ${alpha})`;
@@ -46,6 +71,7 @@ type Props = {
   levels: number[];
   debateRings?: number;
   agentSpeaking?: boolean;
+  thinking?: boolean;
   voiceMode?: boolean;
   micPhase?: MicPhase;
   onVoiceToggle?: () => void;
@@ -55,13 +81,19 @@ export default function CentralVoiceOrb({
   levels,
   debateRings = 0,
   agentSpeaking = false,
+  thinking = false,
   voiceMode = false,
   micPhase = "idle",
   onVoiceToggle,
 }: Props) {
+  const { theme } = useAppShell();
+  const lightTheme = theme === "light";
   const [tick, setTick] = useState(0);
   const micLive = micPhase === "live";
   const micActive = micLive || agentSpeaking;
+  /** From end of user turn until agent speaks (voice pause + backend work). */
+  const showThinking =
+    !agentSpeaking && (thinking || (voiceMode && micPhase === "paused"));
 
   useEffect(() => {
     if (!micActive) return;
@@ -76,6 +108,7 @@ export default function CentralVoiceOrb({
   }, [levels, micActive, tick]);
 
   const statusLine = (() => {
+    if (showThinking) return { title: "Thinking", hint: null };
     if (agentSpeaking) return { title: "Speaking", hint: "Agent reply" };
     if (micPhase === "connecting") return { title: "Loading", hint: "OmniASR worker…" };
     if (micPhase === "paused") return { title: "Voice on", hint: "Paused for reply" };
@@ -84,7 +117,7 @@ export default function CentralVoiceOrb({
   })();
 
   const ringAnimateOpacity = (ring: number): number | number[] => {
-    const { rest, peak } = ringOpacitySegment(ring);
+    const { rest, peak } = ringOpacitySegment(ring, lightTheme);
     const debate = debateRings >= ring;
 
     if (debate) {
@@ -92,6 +125,12 @@ export default function CentralVoiceOrb({
       const lo = 0.28 - t * 0.14;
       const hi = 0.52 - t * 0.34;
       return [lo, hi, lo];
+    }
+    if (showThinking) {
+      const t = ringSegment(ring);
+      const r = rest * (0.65 - t * 0.12);
+      const p = rest + (peak - rest) * (0.5 - t * 0.15);
+      return [r, p, r];
     }
     if (micActive) {
       const r = rest + energy * 0.06;
@@ -130,11 +169,19 @@ export default function CentralVoiceOrb({
             delay: RING_INTRO_DURATION_S + introDelay,
             repeatType: "mirror" as const,
           }
-        : {
-            duration: RING_INTRO_DURATION_S,
-            ease: EASE_IN_OUT,
-            delay: introDelay,
-          },
+        : showThinking
+          ? {
+              duration: 2.4,
+              repeat: Infinity,
+              ease: EASE_IN_OUT,
+              delay: RING_INTRO_DURATION_S + introDelay,
+              repeatType: "mirror" as const,
+            }
+          : {
+              duration: RING_INTRO_DURATION_S,
+              ease: EASE_IN_OUT,
+              delay: introDelay,
+            },
       rotate: {
         duration: 6 + ring * 1.05,
         repeat: Infinity,
@@ -153,6 +200,7 @@ export default function CentralVoiceOrb({
             debate: debateRings >= ring,
             micLive,
             voiceMode,
+            light: lightTheme,
           });
           return (
             <motion.div
@@ -163,8 +211,15 @@ export default function CentralVoiceOrb({
               initial={{ opacity: 0, scale: 0.9 }}
               animate={{
                 opacity: ringOpacityTarget(ring),
-                rotate: debateRings >= ring || micActive ? 360 : voiceMode ? 180 : 0,
-                scale: micActive ? [1, 1 + energy * 0.022, 1] : 1,
+                rotate:
+                  debateRings >= ring || micActive
+                    ? 360
+                    : showThinking
+                      ? 240
+                      : voiceMode
+                        ? 180
+                        : 0,
+                scale: micActive ? [1, 1 + energy * 0.022, 1] : showThinking ? [1, 1.012, 1] : 1,
               }}
               transition={ringTransition(ring)}
             />
@@ -174,18 +229,30 @@ export default function CentralVoiceOrb({
         <motion.button
           type="button"
           aria-pressed={voiceMode}
-          aria-label={voiceMode ? "Exit voice mode" : "Enter voice mode"}
+          aria-label={
+            showThinking
+              ? "Assistant is thinking"
+              : voiceMode
+                ? "Exit voice mode"
+                : "Enter voice mode"
+          }
           disabled={agentSpeaking}
           onClick={() => onVoiceToggle?.()}
           initial={{ opacity: 0, scale: 0.92 }}
-          animate={{ opacity: 1, scale: 1 }}
-          transition={{ duration: 0.55, ease: EASE_IN_OUT, delay: 0.04 }}
+          animate={{ opacity: 1, scale: showThinking ? [1, 1.015, 1] : 1 }}
+          transition={
+            showThinking
+              ? { opacity: { duration: 0.55, ease: EASE_IN_OUT, delay: 0.04 }, scale: { duration: 2.2, repeat: Infinity, ease: EASE_IN_OUT, repeatType: "mirror" } }
+              : { duration: 0.55, ease: EASE_IN_OUT, delay: 0.04 }
+          }
           className={`relative z-10 w-52 h-52 rounded-full border bg-[#0f172a]/95 bg-gradient-to-b from-[#0c4a5e] via-[#172554] to-[#0f172a] cursor-pointer transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/70 disabled:cursor-not-allowed disabled:opacity-50 ${
             debateRings > 0
               ? "shadow-[0_0_70px_rgba(251,191,36,0.22)]"
               : "shadow-[0_0_60px_rgba(34,211,238,0.25)]"
           } ${
-            agentSpeaking
+            showThinking
+              ? "border-violet-300/50 shadow-[0_0_72px_rgba(167,139,250,0.28)]"
+              : agentSpeaking
               ? "border-cyan-300/60"
               : micLive
                 ? "border-emerald-300/70 shadow-[0_0_70px_rgba(52,211,153,0.35)]"
@@ -226,12 +293,20 @@ export default function CentralVoiceOrb({
           <span className="relative z-10 flex flex-col items-center justify-center h-full px-6 text-center pointer-events-none">
             <span
               className={`text-[11px] uppercase tracking-[0.2em] ${
-                micLive || voiceMode ? "text-emerald-200" : "text-cyan-200/80"
+                showThinking
+                  ? "text-violet-200"
+                  : micLive || voiceMode
+                    ? "text-emerald-200"
+                    : "text-cyan-200/80"
               }`}
             >
               {statusLine.title}
             </span>
-            <span className="mt-2 text-xs text-cyan-100/45">{statusLine.hint}</span>
+            {showThinking ? (
+              <ThinkingDotsLine className="mt-4" colorClassName="text-cyan-50/95" aria-hidden />
+            ) : (
+              <span className="mt-2 text-xs text-cyan-100/45">{statusLine.hint}</span>
+            )}
           </span>
         </motion.button>
       </div>

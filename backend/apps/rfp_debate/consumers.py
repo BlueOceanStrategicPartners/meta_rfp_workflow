@@ -32,9 +32,15 @@ class RFPSessionConsumer(AsyncJsonWebsocketConsumer):
 
     async def _validate_cards(self, payload):
         from asgiref.sync import sync_to_async
+        from apps.core.exceptions import CardMutationValidationError
         from apps.ui_card_validator.services import validate_card_mutation
 
-        return await sync_to_async(validate_card_mutation)(self.session_id, payload)
+        try:
+            return await sync_to_async(validate_card_mutation)(self.session_id, payload)
+        except CardMutationValidationError as exc:
+            return {"ok": False, "error": str(exc)}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
 
     async def _load_snapshot(self):
         from asgiref.sync import sync_to_async
@@ -49,11 +55,19 @@ class RFPSessionConsumer(AsyncJsonWebsocketConsumer):
             from apps.rfp_debate.card_normalize import normalize_cards_for_ui
 
             normalize_cards_for_ui(rfp)
+            if rfp.active_ui_cards_json:
+                from apps.negotiation_agent.client_session_memory import (
+                    sync_clarifications_from_cards,
+                )
+
+                sync_clarifications_from_cards(rfp)
+                rfp.save(update_fields=["client_session_json", "updated_at"])
             partial = bool(rfp.amber_conflict_fields_json)
             return {
                 "cards": rfp.active_ui_cards_json,
                 "status": rfp.status,
                 "voice_intro": build_voice_intro_for_rfp(rfp, partial=partial),
+                "client_session": rfp.client_session_json or {},
             }
 
         return await sync_to_async(load)()

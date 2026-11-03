@@ -20,7 +20,7 @@ def test_voice_intro_avoids_internal_jargon(client_user):
     assert "three-agent" not in lower
     assert "walk-away" not in lower
     assert "floor" not in lower
-    assert "voice rfp session" not in lower
+    assert "venue map" not in lower
     assert "297" in intro or "$297" in intro
 
 
@@ -54,6 +54,22 @@ def test_greeting_and_book_room_without_meaningful_cards(client_user):
     normalize_cards_for_ui(rfp)
     reply = generate_voice_assistant_reply("Hi, how are you? I want to book a room.", rfp=rfp)
     assert "how many" in reply.lower() or "dates" in reply.lower()
+
+
+@pytest.mark.django_db
+def test_meeting_space_reply_no_venue_map(client_user):
+    rfp = RFPSubmission.objects.create(
+        client=client_user,
+        active_ui_cards_json={
+            "event_overview": {"company_name": "Acme Corp"},
+            "meeting_space": {"headcount": 100, "seating_style": "classroom"},
+            "live_quote": {"anchor_price": 297, "floor_price": 280},
+        },
+    )
+    reply = generate_voice_assistant_reply("We need the grand ballroom on the map", rfp=rfp)
+    lower = reply.lower()
+    assert "venue map" not in lower
+    assert "meeting space" in lower or "card" in lower
 
 
 @pytest.mark.django_db

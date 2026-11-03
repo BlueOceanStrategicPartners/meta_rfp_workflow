@@ -1,4 +1,4 @@
-"""Designer agent rules — local embeddings (SQLite) + hybrid retrieval for RAG context."""
+"""Designer agent rules — local embeddings (SQLite) + BM25/semantic hybrid RAG."""
 from __future__ import annotations
 
 import hashlib
@@ -57,24 +57,21 @@ def hybrid_score(
     query_embed: list[float],
     query_tokens: set[str],
     rule: DesignerAgentRule,
+    *,
+    bm25_norm: float = 0.0,
 ) -> float:
     sem = cosine(query_embed, rule.embedding_json or [])
+    if bm25_norm > 0.0:
+        return 0.55 * sem + 0.45 * bm25_norm
     kw = keyword_score(query_tokens, rule.search_tokens_json or [])
     return 0.62 * sem + 0.38 * kw
 
 
 def hybrid_query_document_score(query: str, document: str) -> float:
-    """Local semantic + keyword score (same vectors as designer agent rules RAG)."""
-    q = (query or "").strip()
-    doc = (document or "").strip()
-    if not q or not doc:
-        return 0.0
-    q_embed = embed_rule_text(q)
-    q_tokens = set(tokenize(q))
-    sem = cosine(q_embed, embed_rule_text(doc))
-    kw = keyword_score(q_tokens, tokenize(doc))
-    sub = 1.0 if q.lower() in doc.lower() else 0.0
-    return 0.52 * sem + 0.33 * kw + 0.15 * sub
+    """Local semantic + BM25 + substring (see retrieval_scoring.hybrid_rank_documents)."""
+    from .retrieval_scoring import hybrid_query_document_score as _score
+
+    return _score(query, document)
 
 
 def retrieve_relevant_rules(
@@ -88,9 +85,11 @@ def retrieve_relevant_rules(
     )
     if not rules:
         return []
-    q_embed = embed_rule_text(query)
-    q_tokens = set(tokenize(query))
-    scored = [(hybrid_score(q_embed, q_tokens, r), r) for r in rules]
+    from .retrieval_scoring import hybrid_rank_documents
+
+    bodies = [(r.body or "") for r in rules]
+    rank_scores = hybrid_rank_documents(query, bodies)
+    scored = [(rank_scores[i], r) for i, r in enumerate(rules)]
     scored.sort(key=lambda x: x[0], reverse=True)
     top = [r for score, r in scored if score > 0.05][:limit]
     if not top and rules:

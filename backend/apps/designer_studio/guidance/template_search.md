@@ -6,7 +6,7 @@
 
 1. Build a **structure index** from html / css / js: proposal `<section>` blocks, CSS rules, HTML anchors, JS functions, inline `<style>` / `<script>` in single-file Tailwind proposals.
 2. Enrich each symbol with placeholders (`{{…}}`), `data-proposal-*`, and Tailwind `class` tokens from its body.
-3. Rank with **hybrid semantic + keyword** scoring (same local embeddings as `list_template_symbols` and agent rules RAG).
+3. Rank with **BM25 (lexical) + semantic embeddings** (local deterministic vectors; same stack as agent rules RAG).
 4. Return **`symbol_id` + line span** — next step is always `read_template_symbol`, then `replace_lines`.
 
 ## When to use each tool

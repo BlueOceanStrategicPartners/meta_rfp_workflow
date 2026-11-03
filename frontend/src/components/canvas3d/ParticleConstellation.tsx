@@ -1,9 +1,14 @@
 import { useEffect, useRef } from "react";
+import { useAppShell } from "../../context/AppShellContext";
 
 const PARTICLE_COUNT = 52;
 /** Shorter links — less mesh clutter; corners still connect locally */
 const CONNECT_FRAC = 0.16;
-const LINK_RGBA = "186, 230, 253";
+
+const PARTICLE_PALETTE = {
+  dark: { linkRgb: "186, 230, 253", dotRgb: "224, 242, 254", lineMul: 0.9, dotMul: 0.92 },
+  light: { linkRgb: "37, 56, 118", dotRgb: "29, 64, 138", lineMul: 1.05, dotMul: 0.78 },
+} as const;
 
 function easeInOutCubic(t: number) {
   return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
@@ -119,6 +124,9 @@ function segmentMidpointInExclusion(
 
 export default function ParticleConstellation() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const { theme } = useAppShell();
+  const themeRef = useRef(theme);
+  themeRef.current = theme;
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -302,10 +310,11 @@ export default function ParticleConstellation() {
           if (alpha < 0.05) continue;
 
           const depth = 0.4 + ((pi.z + pj.z) * 0.5) * 0.5;
-          const lineAlpha = Math.min(0.72, alpha * depth * 0.9);
+          const palette = themeRef.current === "light" ? PARTICLE_PALETTE.light : PARTICLE_PALETTE.dark;
+          const lineAlpha = Math.min(0.82, alpha * depth * palette.lineMul);
 
           ctx.beginPath();
-          ctx.strokeStyle = `rgba(${LINK_RGBA}, ${lineAlpha})`;
+          ctx.strokeStyle = `rgba(${palette.linkRgb}, ${lineAlpha})`;
           ctx.lineWidth = 1 + depth * 0.55;
           ctx.moveTo(pi.x, pi.y);
           ctx.lineTo(pj.x, pj.y);
@@ -313,12 +322,13 @@ export default function ParticleConstellation() {
         }
       }
 
+      const dotPalette = themeRef.current === "light" ? PARTICLE_PALETTE.light : PARTICLE_PALETTE.dark;
       for (const p of particles) {
         if (inExclusion(p.x, p.y, ex)) continue;
         const depth = 0.16 + p.z * 0.78;
         const radius = 0.75 + depth * 1.05;
         ctx.beginPath();
-        ctx.fillStyle = `rgba(224, 242, 254, ${depth * 0.92})`;
+        ctx.fillStyle = `rgba(${dotPalette.dotRgb}, ${depth * dotPalette.dotMul})`;
         ctx.arc(p.x, p.y, radius, 0, Math.PI * 2);
         ctx.fill();
       }

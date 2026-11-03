@@ -129,7 +129,7 @@ export default function TemplateLibraryCard({
           ) : (
             <div className="studio-template-card-empty m-2 rounded-lg">
               <span className="text-2xl opacity-40">◇</span>
-              <span className="text-[10px] text-white/35">No layout yet</span>
+              <span className="studio-template-card-empty-hint text-[10px]">No layout yet</span>
             </div>
           )}
         </div>
@@ -150,23 +150,19 @@ export default function TemplateLibraryCard({
               />
             ) : (
               <p
-                className={`truncate text-sm font-medium text-white/95 ${selected && onNameChange ? "cursor-text" : ""}`}
+                className={`studio-template-card-title truncate text-sm font-medium ${selected && onNameChange ? "cursor-text" : ""}`}
                 onDoubleClick={startRename}
                 title={selected && onNameChange ? "Double-click to rename" : undefined}
               >
                 {displayName}
               </p>
             )}
-            <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-white/40">
+            <div className="studio-template-card-submeta mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px]">
               {!isDraft && (
                 <time dateTime={template.updated_at}>{new Date(template.updated_at).toLocaleString()}</time>
               )}
-              {isDraft && <span className="text-violet-200/70">Unsaved draft</span>}
-              {isDefault && (
-                <span className="rounded-full bg-amber-500/20 px-1.5 py-0.5 font-medium text-amber-200">
-                  Default
-                </span>
-              )}
+              {isDraft && <span className="studio-template-draft-label">Unsaved draft</span>}
+              {isDefault && <span className="studio-template-default-badge">Default</span>}
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
@@ -207,7 +203,7 @@ export default function TemplateLibraryCard({
         ) : null}
 
         {showActionsRow ? (
-          <div className="studio-template-card-actions-row mt-2 flex flex-wrap items-center justify-center gap-1 border-t border-white/10 pt-2">
+          <div className="studio-template-card-actions-row mt-2 flex flex-wrap items-center justify-center gap-1 border-t pt-2">
             {!isDraft && (
               <TemplateIconButton micro label="Duplicate" disabled={busy} onClick={actions.onDuplicate}>
                 <IconDuplicate />

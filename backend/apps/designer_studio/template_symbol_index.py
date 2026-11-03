@@ -13,7 +13,7 @@ from typing import Any, Literal
 
 from .template_workspace import TemplateFile, TemplateWorkspace, normalize_template_file_arg
 
-from .agent_rules import hybrid_query_document_score
+from .retrieval_scoring import hybrid_rank_documents
 
 _index_cache: dict[str, list["TemplateSymbol"]] = {}
 
@@ -556,10 +556,14 @@ def execute_search_template(
         }
 
     q_lower = query.lower()
-    scored: list[tuple[float, TemplateSymbol]] = []
+    doc_by_sym: list[tuple[TemplateSymbol, str]] = []
     for sym in candidates:
         doc = _build_symbol_search_document(workspace, sym)
-        score = hybrid_query_document_score(query, doc)
+        doc_by_sym.append((sym, doc))
+    rank_scores = hybrid_rank_documents(query, [d for _, d in doc_by_sym])
+    scored: list[tuple[float, TemplateSymbol]] = []
+    for idx, (sym, doc) in enumerate(doc_by_sym):
+        score = rank_scores[idx] if idx < len(rank_scores) else 0.0
         if q_lower in doc.lower():
             score = min(1.0, score + 0.12)
         if sym.name.lower() == q_lower or q_lower in sym.name.lower():
@@ -600,7 +604,7 @@ def execute_search_template(
         "total_shown": len(hits),
         "total_indexed": len(candidates),
         "context_note": (
-            "Hybrid structure search (semantic + keyword on HTML sections, Tailwind classes, "
+            "Hybrid structure search (BM25 lexical + semantic embeddings on HTML sections, Tailwind classes, "
             "placeholders, CSS rules, inline script/style blocks). "
             "Use read_template_symbol on symbol_id — full section in one read — then replace_lines."
         ),
@@ -731,10 +735,9 @@ def execute_list_template_symbols(
         syms = [s for s in syms if s.kind == kind]
     total_before_rank = len(syms)
     if query:
-        scored: list[tuple[float, TemplateSymbol]] = []
-        for s in syms:
-            doc = f"{s.name} {s.preview}"
-            scored.append((hybrid_query_document_score(query, doc), s))
+        doc_pairs = [(s, f"{s.name} {s.preview}") for s in syms]
+        rank_scores = hybrid_rank_documents(query, [d for _, d in doc_pairs])
+        scored = [(rank_scores[i], doc_pairs[i][0]) for i in range(len(doc_pairs))]
         scored.sort(key=lambda x: x[0], reverse=True)
         syms = [s for score, s in scored if score > 0.04][:max_items]
         if not syms and scored:
@@ -751,8 +754,8 @@ def execute_list_template_symbols(
         "total_matched": total,
         "shown": len(syms),
         "context_note": (
-            "When `query` is set, results are ranked by hybrid semantic + keyword search "
-            "(same local embeddings as designer agent rules). "
+            "When `query` is set, results are ranked by hybrid BM25 + semantic search "
+            "(same stack as designer agent rules RAG). "
             "For proposal edits prefer kind=proposal_section — one read returns the full section "
             "(HTML + Tailwind + inline JS). Then replace_lines on that line range."
         ),
