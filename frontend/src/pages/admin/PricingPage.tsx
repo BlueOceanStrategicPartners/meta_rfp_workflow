@@ -192,7 +192,7 @@ function PolicyEditor({
   );
 }
 
-function LadderExampleLine({ policy, rackRate, sample }: { policy: PolicyNumbers; rackRate: number; sample: boolean }) {
+function LadderExampleLine({ policy, rackRate }: { policy: PolicyNumbers; rackRate: number }) {
   const [month, setMonth] = useState(() => new Date().getMonth() + 1);
   const ex = computeLadderExample(policy, rackRate, 3, month);
   return (
@@ -219,9 +219,7 @@ function LadderExampleLine({ policy, rackRate, sample }: { policy: PolicyNumbers
         <strong>{formatMoney(ex.target)}</strong> · anchor <strong>{formatMoney(ex.anchor)}</strong>
       </p>
       <p className="admin-faint mt-1 text-[11px]">
-        {sample
-          ? "Uses a sample nightly rate because no spaces have been added yet."
-          : "Uses your highest rack rate. Before any space floor cost is applied."}
+        Uses your highest rack rate. Before any space floor cost is applied.
       </p>
     </div>
   );
@@ -265,8 +263,6 @@ const QUOTE_COLUMNS: AdminColumn<QuoteWithRfp>[] = [
 ];
 
 /* ---------------- Page ---------------- */
-
-const SAMPLE_RACK_RATE = 8500;
 
 export default function PricingPage() {
   const { notify } = useAdminFeedback();
@@ -430,10 +426,12 @@ export default function PricingPage() {
                 }}
                 errors={errors}
               />
-              {valid ? (
-                <LadderExampleLine policy={numbers} rackRate={rackRate ?? SAMPLE_RACK_RATE} sample={rackRate === null} />
-              ) : (
+              {!valid ? (
                 <p className="admin-alert admin-alert--warning">Fix the highlighted values to see an example quote.</p>
+              ) : rackRate === null ? (
+                <p className="admin-muted text-xs">Add a space in Inventory to see an example quote with your real prices.</p>
+              ) : (
+                <LadderExampleLine policy={numbers} rackRate={rackRate} />
               )}
             </div>
           )}
