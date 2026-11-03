@@ -32,8 +32,9 @@ export default function App() {
       return ["app-nav-link", active ? "app-nav-link-active" : "app-nav-link-inactive"].join(" ");
     };
   const onStudio = location.pathname.startsWith("/designer");
+  const onAdmin = location.pathname.startsWith("/admin");
 
-  const studioLoginPath = "/designer";
+  const studioLoginPath = onAdmin ? "/admin" : "/designer";
   const [confirmLogoutOpen, setConfirmLogoutOpen] = useState(false);
   const [logoutBusy, setLogoutBusy] = useState(false);
 
@@ -72,7 +73,7 @@ export default function App() {
           <span className="hidden text-white/35 sm:inline">/</span>
           <nav className="app-nav-tabs" aria-label="Primary">
             {PRIMARY_NAV.map(({ to, label, Icon }) => (
-              <NavLink key={to} to={to} className={navLinkClass(to)} end={to !== "/client"}>
+              <NavLink key={to} to={to} className={navLinkClass(to)} end={to === "/designer"}>
                 <Icon />
                 <span>{label}</span>
               </NavLink>
@@ -88,7 +89,7 @@ export default function App() {
           >
             {theme === "dark" ? <IconSun /> : <IconMoon />}
           </TemplateIconButton>
-          {onStudio && designerAuthed && (
+          {(onStudio || onAdmin) && designerAuthed && (
             <TemplateIconButton
               compact
               label="Log out"
@@ -105,7 +106,7 @@ export default function App() {
           <Route path="/" element={<ClientWorkspace />} />
           <Route path="/client" element={<ClientWorkspace />} />
           <Route path="/designer" element={<DesignerPortal />} />
-          <Route path="/admin" element={<AdminPortal />} />
+          <Route path="/admin/*" element={<AdminPortal />} />
         </Routes>
       </main>
     </div>

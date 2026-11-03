@@ -130,7 +130,7 @@ class PricingPolicyView(AdminAPIView):
         serializer = PricingPolicySerializer(policy, data=request.data)
         if not serializer.is_valid():
             return Response(
-                {"detail": "Some pricing rules need fixing.", "errors": serializer.errors},
+                {"detail": _first_message(serializer.errors), "errors": serializer.errors},
                 status=status.HTTP_400_BAD_REQUEST,
             )
         policy = serializer.save(updated_by=request.user)

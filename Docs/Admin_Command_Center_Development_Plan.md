@@ -1,6 +1,6 @@
 # Admin Command Center: Development Plan
 
-**Branch:** `develop/admin-panel` · **Base:** `main` @ `f7ad9da` · **Written:** 2026-11-03
+**Branch:** `develop/admin-panel` · **Base:** `main` @ `f7ad9da` · **Written:** 2026-11-03 · **Updated:** 2026-11-03 (Module 1 Map Studio dropped)
 **Time box:** 60 minutes of implementation and testing
 **Spec sources:**
 - `Docs/Multi_Agent_Rfp_Engine_Development_Plan_2466.md`: §6.2 (the 7 admin modules), §7.2 (data model) and §9 (failure paths).
@@ -47,7 +47,7 @@
 
 | Item | Priority | Reason |
 |---|---|---|
-| Module 1, AI Venue Map Studio | P2 | Its models were removed on 3 Nov. Ownership with the Designer Studio (Sasidu) must be agreed first. The page ships as a "Planned" panel. |
+| Module 1, AI Venue Map Studio | Dropped | Removed from the project on 3 Nov (decision by Sasidu). No admin page, route or menu item. |
 | Live WebSocket push to the admin UI | P1 | P0 uses 10-second polling. The consumer role check is still P0. |
 | Negotiation transcript (client turns) | P1 | This is a small hook in the voice-chat views, logged into the same audit table. |
 | Token usage per Muse call | P1 | It touches `meta_client.py`, which the Designer Studio shares. |
@@ -363,7 +363,6 @@ These are the exhaustive list of edits outside the admin app.
 | `/admin/inventory` | `InventoryPage` | 5 |
 | `/admin/occupancy` | `OccupancyPage` | 6 |
 | `/admin/telemetry` | `TelemetryPage` | 7 |
-| `/admin/map` | `MapStudioPage` ("Planned" panel) | 1 (P2) |
 | `/admin/*` (unknown) | Redirect to `/admin` | — |
 
 **`App.tsx` edits** (shared file; these three changes only):
@@ -379,7 +378,7 @@ These are the exhaustive list of edits outside the admin app.
 frontend/src/pages/AdminPortal.tsx            replaced: auth guard + <AdminLayout> + nested <Routes>
 frontend/src/pages/admin/
   OverviewPage.tsx  DebatesPage.tsx  DebateDetailPage.tsx  PricingPage.tsx
-  NegotiationsPage.tsx  InventoryPage.tsx  OccupancyPage.tsx  TelemetryPage.tsx  MapStudioPage.tsx
+  NegotiationsPage.tsx  InventoryPage.tsx  OccupancyPage.tsx  TelemetryPage.tsx
 frontend/src/components/admin/
   AdminLayout.tsx        module rail (aside) + content panel
   AdminPanel.tsx         studio-panel-header (kicker/title/subtitle/actions) + studio-panel-body
@@ -458,10 +457,6 @@ Each page is wrapped in `AdminPanel`, so it gets one header (kicker = module nam
 - An SLA table for recent RFPs. Durations over 120 s are shown in red text with the word *"Over"*.
 - The funnel, a debate stats tile row and the pricing fallback rate.
 - **Token usage:** *"Not recorded yet"* with one line saying it arrives with model call logging (P1).
-
-**Map Studio** (`/admin/map`)
-- One `AdminPanel`, subtitle *"Floorplan to interactive map, with zones linked to inventory."*
-- A short list of what's planned, and a link to Inventory (*"Zones will link to these spaces"*). There are no fake controls.
 
 ### 8.4 State and data rules
 
@@ -609,12 +604,12 @@ npm run test:e2e                                          # P1, servers running
 | 0:00–0:05 | `.env`, migrate, `seed_demo`, start the servers | `npm install`, start Vite | Both servers up; this contract frozen |
 | 0:05–0:15 | `test_admin_permissions.py` (red) → `AdminAuditEvent`, `PricingPolicy`, migrations, demo admin, consumer role check | `adminApi.ts` types from §6, `useAdminAuth`, guard + login, `App.tsx` edits, `AdminLayout`, rail, `AdminPanel` | Admin can sign in to an empty layout |
 | 0:15–0:30 | Inventory CRUD, overview, rfps list/detail/override, pricing policy/model/retrain/quotes + **ladder fixes**, `sla_completed_at` | Overview, Inventory (with dialog), Debates, Debate detail | Permission test green |
-| 0:30–0:40 | Negotiation takeover/release/message + voice-chat gate, occupancy upload/list/summary, telemetry, audit | Pricing, Negotiations, Occupancy, Telemetry, Map placeholder | All §11.1 test files written |
+| 0:30–0:40 | Negotiation takeover/release/message + voice-chat gate, occupancy upload/list/summary, telemetry, audit | Pricing, Negotiations, Occupancy, Telemetry | All §11.1 test files written |
 | 0:40–0:48 | `seed_admin_demo`; full `pytest` green | `adminFormat.test.ts`; `npm run build` green | Both suites green |
 | 0:48–0:56 | Integration and manual QA (§11.3), both together; fix what breaks | | Checklist ticked |
 | 0:56–1:00 | Commit, push `develop/admin-panel`, open PR | Rehearse the demo script | PR open |
 
-**If you're behind, cut in this order:** the Map placeholder copy polish, then the PriceLadder visual (keep the numbers), then Occupancy date filter, then Telemetry funnel bars (keep the counts), then Inventory property rename. **Never cut:** the permission matrix test, the ladder invariant test, the takeover gate, or the sign-in guard.
+**If you're behind, cut in this order:** the PriceLadder visual (keep the numbers), then Occupancy date filter, then Telemetry funnel bars (keep the counts), then Inventory property rename. **Never cut:** the permission matrix test, the ladder invariant test, the takeover gate, or the sign-in guard.
 
 ---
 
@@ -638,11 +633,6 @@ npm run test:e2e                                          # P1, servers running
 - **Live admin feed:** `broadcast_admin` from the debate loop, card validation and quote creation; `useAdminTelemetry` switches to WebSocket and polling stays as the fallback.
 - **Transcript:** `negotiation.turn` audit events from the voice-chat views, shown in Negotiations.
 - **`ModelCallLog`** for token usage and latency per Muse call, which fills Telemetry's `tokens`.
-- **Module 1, Map Studio:**
-  - Re-add map and zone models (agree with Designer first).
-  - Floorplan upload and a Wonder vision trace.
-  - A polygon editor for confidence under 85%.
-  - Zone ↔ `SpaceInventory` linking, and the client's map responding to `map_highlight`.
 - **Concession playbook:** a model with ranked perks that the negotiation agent reads, and an editor in Module 4.
 - **Enforce `max_autonomous_discount_pct`** in `/api/negotiation/offer/`.
 - **Security clean-ups outside admin scope:**
