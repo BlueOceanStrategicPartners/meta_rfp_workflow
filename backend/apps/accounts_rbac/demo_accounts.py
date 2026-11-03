@@ -1,4 +1,4 @@
-"""Local demo studio credentials (Designer / Map Studio portals)."""
+"""Local demo studio credentials (Designer / Admin portals)."""
 
 from django.conf import settings
 
@@ -7,36 +7,68 @@ from apps.accounts_rbac.models import CustomUser, UserRole
 STUDIO_DEMO_EMAIL = "designer@demo.local"
 STUDIO_DEMO_PASSWORD = "demo12345"
 
+ADMIN_DEMO_EMAIL = "admin@demo.local"
+ADMIN_DEMO_PASSWORD = "admin12345"
 
-def ensure_studio_demo_user(*, reset_password: bool = False) -> CustomUser:
-    """Create or refresh the local designer demo account."""
+
+def _ensure_demo_user(
+    *, email: str, username: str, role: str, password: str, reset_password: bool
+) -> CustomUser:
     user, created = CustomUser.objects.get_or_create(
-        email=STUDIO_DEMO_EMAIL,
+        email=email,
         defaults={
-            "username": "designer",
-            "role": UserRole.DESIGNER,
+            "username": username,
+            "role": role,
             "is_active": True,
         },
     )
     changed = created
-    if user.role != UserRole.DESIGNER:
-        user.role = UserRole.DESIGNER
+    if user.role != role:
+        user.role = role
         changed = True
     if not user.is_active:
         user.is_active = True
         changed = True
     if reset_password or created or not user.has_usable_password():
-        user.set_password(STUDIO_DEMO_PASSWORD)
+        user.set_password(password)
         changed = True
     if changed:
         user.save()
     return user
 
 
+def ensure_studio_demo_user(*, reset_password: bool = False) -> CustomUser:
+    """Create or refresh the local designer demo account."""
+    return _ensure_demo_user(
+        email=STUDIO_DEMO_EMAIL,
+        username="designer",
+        role=UserRole.DESIGNER,
+        password=STUDIO_DEMO_PASSWORD,
+        reset_password=reset_password,
+    )
+
+
+def ensure_admin_demo_user(*, reset_password: bool = False) -> CustomUser:
+    """Create or refresh the local admin demo account."""
+    return _ensure_demo_user(
+        email=ADMIN_DEMO_EMAIL,
+        username="admin",
+        role=UserRole.ADMIN,
+        password=ADMIN_DEMO_PASSWORD,
+        reset_password=reset_password,
+    )
+
+
+DEMO_ACCOUNTS = {
+    STUDIO_DEMO_EMAIL: (STUDIO_DEMO_PASSWORD, ensure_studio_demo_user),
+    ADMIN_DEMO_EMAIL: (ADMIN_DEMO_PASSWORD, ensure_admin_demo_user),
+}
+
+
 def try_resolve_studio_login(email: str, password: str) -> CustomUser | None:
     """
     Return the user when email/password are valid.
-    In DEBUG, auto-provision or reset the known demo account so local login works
+    In DEBUG, auto-provision or reset the known demo accounts so local login works
     without manually running seed_demo.
     """
     normalized = (email or "").strip().lower()
@@ -50,12 +82,11 @@ def try_resolve_studio_login(email: str, password: str) -> CustomUser | None:
     if not settings.DEBUG:
         return None
 
-    demo_email = STUDIO_DEMO_EMAIL
-    demo_password = STUDIO_DEMO_PASSWORD
-    if normalized != demo_email or password != demo_password:
+    demo = DEMO_ACCOUNTS.get(normalized)
+    if demo is None or password != demo[0]:
         return None
 
-    demo_user = ensure_studio_demo_user(reset_password=True)
+    demo_user = demo[1](reset_password=True)
     if demo_user.check_password(password):
         return demo_user
     return None

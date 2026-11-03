@@ -21,6 +21,39 @@ def _sse(event: str, payload: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(payload)}\n\n"
 
 
+HUMAN_TAKEOVER_REPLY = "A member of our team has joined and will reply shortly."
+
+
+def _is_human_takeover(rfp: RFPSubmission | None) -> bool:
+    """While an admin has taken over (ESCALATED), the assistant stays silent."""
+    return bool(rfp and rfp.status == RFPStatus.ESCALATED)
+
+
+def _ensure_reply_saved(rfp: RFPSubmission, reply: str | None) -> None:
+    """Some streamed reply paths don't persist the final text; save it once so the admin conversation is complete."""
+    from .client_session_memory import normalize_session, record_assistant_reply
+
+    text = (reply or "").strip()
+    if not text:
+        return
+    rfp.refresh_from_db(fields=["client_session_json"])
+    transcript = normalize_session(rfp.client_session_json).get("transcript") or []
+    if transcript and transcript[-1]["role"] == "assistant" and transcript[-1]["text"] == text[:2000]:
+        return
+    record_assistant_reply(rfp, text)
+    rfp.save(update_fields=["client_session_json", "updated_at"])
+
+
+def _record_takeover_turn(rfp: RFPSubmission, message: str) -> None:
+    """Keep the client's words in the conversation history so the admin can read them."""
+    from .client_session_memory import record_assistant_reply, record_voice_turn
+
+    if message.strip():
+        record_voice_turn(rfp, message.strip())
+    record_assistant_reply(rfp, HUMAN_TAKEOVER_REPLY)
+    rfp.save(update_fields=["client_session_json", "updated_at"])
+
+
 class VoiceAssistantChatView(APIView):
     """Spark-driven assistant text for SeamlessM4T v2 playback (single reply per turn)."""
 
@@ -33,6 +66,9 @@ class VoiceAssistantChatView(APIView):
         rfp = None
         if rfp_id:
             rfp = RFPSubmission.objects.filter(pk=rfp_id).first()
+        if _is_human_takeover(rfp):
+            _record_takeover_turn(rfp, message)
+            return Response({"reply": HUMAN_TAKEOVER_REPLY, "human_takeover": True})
         try:
             if rfp and message.strip():
                 from .client_session_memory import record_voice_turn
@@ -76,13 +112,22 @@ class VoiceAssistantChatStreamView(APIView):
         if rfp_id:
             rfp = RFPSubmission.objects.filter(pk=rfp_id).first()
 
+        taken_over = _is_human_takeover(rfp)
+        if taken_over:
+            _record_takeover_turn(rfp, message)
+
         def event_stream():
+            if taken_over:
+                yield _sse("done", {"reply": HUMAN_TAKEOVER_REPLY, "human_takeover": True})
+                return
             try:
                 for item in iter_voice_assistant_stream(
                     message,
                     rfp=rfp,
                     rfp_status=rfp.status if rfp else None,
                 ):
+                    if item["type"] == "done" and rfp is not None:
+                        _ensure_reply_saved(rfp, item.get("reply"))
                     yield _sse(item["type"], {k: v for k, v in item.items() if k != "type"})
             except FloorPriceBreachAttemptError:
                 yield _sse("done", {"reply": "I can't process that request.", "blocked": True})

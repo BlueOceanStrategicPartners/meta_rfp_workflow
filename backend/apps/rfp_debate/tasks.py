@@ -38,7 +38,12 @@ def _apply_quote_to_cards(rfp: RFPSubmission, quote) -> None:
     }
     rfp.active_ui_cards_json = cards
     rfp.status = RFPStatus.NEGOTIATING
-    rfp.save(update_fields=["active_ui_cards_json", "status", "updated_at"])
+    update_fields = ["active_ui_cards_json", "status", "updated_at"]
+    if not rfp.sla_completed_at:
+        # SLA clock stops when the client first sees a priced package.
+        rfp.sla_completed_at = timezone.now()
+        update_fields.append("sla_completed_at")
+    rfp.save(update_fields=update_fields)
 
 
 def enqueue_debate_pipeline(rfp_id: str) -> None:
@@ -116,6 +121,12 @@ def run_debate_pipeline(rfp_id: str) -> dict:
     utterance = build_voice_intro_for_rfp(rfp, partial=partial)
     if utterance:
         broadcast_rfp(str(rfp.id), "agent_utterance", {"text": utterance})
+        # Keep the spoken summary in the conversation history (the admin reads it on takeover).
+        from apps.negotiation_agent.client_session_memory import record_assistant_reply
+
+        rfp.refresh_from_db(fields=["client_session_json"])
+        record_assistant_reply(rfp, utterance)
+        rfp.save(update_fields=["client_session_json"])
     return {
         "rfp_id": str(rfp.id),
         "partial": partial,

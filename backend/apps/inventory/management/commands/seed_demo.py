@@ -1,7 +1,7 @@
 from django.core.management.base import BaseCommand
 
 from apps.designer_studio.models import ALL_BINDING_PLACEHOLDERS, ProposalTemplate
-from apps.accounts_rbac.demo_accounts import ensure_studio_demo_user
+from apps.accounts_rbac.demo_accounts import ensure_admin_demo_user, ensure_studio_demo_user
 from apps.inventory.models import (
     HistoricalOccupancy,
     SpaceInventory,
@@ -45,6 +45,7 @@ class Command(BaseCommand):
                 },
             )
         designer = ensure_studio_demo_user(reset_password=True)
+        ensure_admin_demo_user(reset_password=True)
         html = "".join(
             f"<div>{p}</div>" for p in ALL_BINDING_PLACEHOLDERS
         )

@@ -28,9 +28,14 @@ export function useBidirectionalAgentUI(
   useEffect(() => {
     if (!sessionId) return;
     const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-    const ws = new WebSocket(`${protocol}://${window.location.host}/ws/rfp/${sessionId}/`);
-    wsRef.current = ws;
-    ws.onmessage = (ev) => {
+    const url = `${protocol}://${window.location.host}/ws/rfp/${sessionId}/`;
+    // Reconnect if the socket drops (backend restart, network blip); otherwise pushed messages
+    // such as an admin's takeover replies would silently stop arriving.
+    let stopped = false;
+    let attempt = 0;
+    let retryTimer: number | undefined;
+
+    const onMessage = (ev: MessageEvent) => {
       const msg: AgentMessage = JSON.parse(ev.data);
       if (msg.type === "session_snapshot") {
         const payload = msg.payload || {};
@@ -72,8 +77,27 @@ export function useBidirectionalAgentUI(
         if (text) onUtteranceRef.current?.(text, { mandatory: true });
       }
     };
+
+    const connect = () => {
+      const ws = new WebSocket(url);
+      wsRef.current = ws;
+      ws.onopen = () => {
+        attempt = 0;
+      };
+      ws.onmessage = onMessage;
+      ws.onclose = () => {
+        if (stopped) return;
+        const delay = Math.min(10_000, 1_000 * 2 ** attempt);
+        attempt += 1;
+        retryTimer = window.setTimeout(connect, delay);
+      };
+    };
+    connect();
+
     return () => {
-      ws.close();
+      stopped = true;
+      if (retryTimer) window.clearTimeout(retryTimer);
+      wsRef.current?.close();
       if (saveResetTimer.current) window.clearTimeout(saveResetTimer.current);
     };
   }, [sessionId]);

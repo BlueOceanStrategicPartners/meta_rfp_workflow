@@ -15,12 +15,13 @@ class AdminPricingGuardrailView(APIView):
     permission_classes = [IsAdminRole]
 
     def get(self, request):
-        from django.conf import settings
+        from .models import PricingPolicy
 
+        policy = PricingPolicy.get_solo()
         return Response(
             {
-                "walk_away_floor_margin_pct": settings.WALK_AWAY_FLOOR_MARGIN_PCT,
-                "max_autonomous_discount_pct": settings.MAX_AUTONOMOUS_DISCOUNT_PCT,
+                "walk_away_floor_margin_pct": policy.walk_away_floor_margin_pct,
+                "max_autonomous_discount_pct": policy.max_autonomous_discount_pct,
             }
         )
 

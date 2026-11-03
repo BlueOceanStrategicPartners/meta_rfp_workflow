@@ -1,0 +1,562 @@
+/*
+ * Admin Command Center styles.
+ * Builds on the studio-* classes in index.css (never edited) and only adds
+ * semantic colours that switch with html[data-theme]. Plain CSS on purpose.
+ */
+
+.admin-root {
+  --admin-fg: rgba(255, 255, 255, 0.92);
+  --admin-muted: rgba(255, 255, 255, 0.58);
+  --admin-faint: rgba(255, 255, 255, 0.4);
+  --admin-line: rgba(255, 255, 255, 0.1);
+  --admin-surface: rgba(255, 255, 255, 0.03);
+  --admin-surface-strong: rgba(255, 255, 255, 0.07);
+  --admin-hover: rgba(255, 255, 255, 0.05);
+  --admin-th-bg: #10162a;
+  --admin-danger: #fca5a5;
+  --admin-success: #6ee7b7;
+  --admin-warning: #fcd34d;
+  --admin-mark: rgba(250, 204, 21, 0.28);
+  --admin-dialog-bg: #121828;
+  color-scheme: dark;
+  color: var(--admin-fg);
+}
+
+html[data-theme="light"] .admin-root {
+  --admin-fg: #0f172a;
+  --admin-muted: #475569;
+  --admin-faint: #64748b;
+  --admin-line: #e2e8f0;
+  --admin-surface: rgba(255, 255, 255, 0.7);
+  --admin-surface-strong: #f1f5f9;
+  --admin-hover: #f1f5f9;
+  --admin-th-bg: #f8fafc;
+  --admin-danger: #b91c1c;
+  --admin-success: #047857;
+  --admin-warning: #b45309;
+  --admin-mark: rgba(250, 204, 21, 0.45);
+  --admin-dialog-bg: #ffffff;
+  color-scheme: light;
+}
+
+.admin-fg {
+  color: var(--admin-fg);
+}
+.admin-muted {
+  color: var(--admin-muted);
+}
+.admin-faint {
+  color: var(--admin-faint);
+}
+.admin-danger-text {
+  color: var(--admin-danger);
+}
+.admin-success-text {
+  color: var(--admin-success);
+}
+.admin-warning-text {
+  color: var(--admin-warning);
+}
+.admin-num {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Native select menus inherit the dark field colours otherwise. */
+.admin-root select option {
+  background: #0c121f;
+  color: #fff;
+}
+html[data-theme="light"] .admin-root select option {
+  background: #fff;
+  color: #0f172a;
+}
+
+.admin-label {
+  display: block;
+  margin-bottom: 0.375rem;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--admin-muted);
+}
+
+.admin-card {
+  border: 1px solid var(--admin-line);
+  background: var(--admin-surface);
+  border-radius: 0.875rem;
+}
+
+.admin-section-title {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--admin-fg);
+}
+
+.admin-divider {
+  border-top: 1px solid var(--admin-line);
+}
+
+/* Field invalid state. */
+.admin-root .studio-field.admin-field-invalid {
+  border-color: rgba(248, 113, 113, 0.7);
+}
+
+/* ---------------- Buttons ---------------- */
+
+.admin-root .studio-btn-secondary:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.admin-root .studio-btn-secondary.admin-btn-primary {
+  border-color: rgba(167, 139, 250, 0.6);
+  background: linear-gradient(90deg, #7c3aed, #c026d3);
+  color: #fff;
+}
+.admin-root .studio-btn-secondary.admin-btn-primary:hover:not(:disabled) {
+  filter: brightness(1.1);
+}
+html[data-theme="light"] .admin-root .studio-btn-secondary.admin-btn-primary {
+  border-color: #7c3aed;
+  background: linear-gradient(90deg, #7c3aed, #c026d3);
+  color: #fff;
+}
+html[data-theme="light"] .admin-root .studio-btn-secondary.studio-btn-danger {
+  border-color: #fecaca;
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+.admin-btn-small {
+  min-height: 2.25rem !important;
+  padding-left: 0.75rem !important;
+  padding-right: 0.75rem !important;
+}
+
+.admin-link {
+  color: #c4b5fd;
+  text-decoration: underline;
+  text-decoration-color: rgba(196, 181, 253, 0.4);
+  text-underline-offset: 2px;
+}
+.admin-link:hover {
+  text-decoration-color: currentColor;
+}
+html[data-theme="light"] .admin-link {
+  color: #6d28d9;
+}
+
+/* ---------------- Rail ---------------- */
+
+.admin-rail-link {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 0.625rem;
+  min-height: 2.5rem;
+  border-radius: 0.75rem;
+  border: 1px solid transparent;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  white-space: nowrap;
+  color: var(--admin-muted);
+  transition: background-color 150ms ease, color 150ms ease, border-color 150ms ease;
+}
+.admin-rail-link:hover {
+  background: var(--admin-hover);
+  color: var(--admin-fg);
+}
+.admin-rail-link.is-active {
+  border-color: rgba(167, 139, 250, 0.35);
+  background: rgba(139, 92, 246, 0.16);
+  color: var(--admin-fg);
+}
+html[data-theme="light"] .admin-rail-link.is-active {
+  border-color: #ddd6fe;
+  background: #f5f3ff;
+  color: #4c1d95;
+}
+.admin-rail-link svg {
+  flex-shrink: 0;
+  opacity: 0.85;
+}
+.admin-rail-badge {
+  margin-left: auto;
+  border-radius: 999px;
+  border: 1px solid var(--admin-line);
+  padding: 0 0.4rem;
+  font-size: 10px;
+  color: var(--admin-faint);
+}
+
+/* ---------------- Tables ---------------- */
+
+.admin-table-wrap {
+  overflow: auto;
+  border: 1px solid var(--admin-line);
+  border-radius: 0.875rem;
+}
+
+.admin-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 0.8125rem;
+}
+.admin-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--admin-th-bg);
+  border-bottom: 1px solid var(--admin-line);
+  padding: 0.625rem 0.75rem;
+  text-align: left;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--admin-muted);
+}
+.admin-table td {
+  border-bottom: 1px solid var(--admin-line);
+  padding: 0.625rem 0.75rem;
+  vertical-align: middle;
+  color: var(--admin-fg);
+}
+.admin-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+.admin-table th.is-num,
+.admin-table td.is-num {
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.admin-table tr.is-clickable {
+  cursor: pointer;
+}
+.admin-table tr.is-clickable:hover td,
+.admin-table tr.is-selected td {
+  background: var(--admin-hover);
+}
+.admin-table tr.is-clickable:focus-visible {
+  outline: 2px solid rgba(139, 92, 246, 0.7);
+  outline-offset: -2px;
+}
+
+/* ---------------- Chips ---------------- */
+
+.admin-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  border-radius: 999px;
+  border: 1px solid;
+  padding: 0.125rem 0.55rem;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+.admin-chip::before {
+  content: "";
+  width: 0.375rem;
+  height: 0.375rem;
+  border-radius: 999px;
+  background: currentColor;
+  opacity: 0.85;
+}
+.admin-chip--plain::before {
+  display: none;
+}
+
+.admin-chip--violet { color: #ddd6fe; background: rgba(139, 92, 246, 0.16); border-color: rgba(139, 92, 246, 0.4); }
+.admin-chip--sky { color: #bae6fd; background: rgba(14, 165, 233, 0.14); border-color: rgba(14, 165, 233, 0.4); }
+.admin-chip--emerald { color: #a7f3d0; background: rgba(16, 185, 129, 0.14); border-color: rgba(16, 185, 129, 0.4); }
+.admin-chip--indigo { color: #c7d2fe; background: rgba(99, 102, 241, 0.16); border-color: rgba(99, 102, 241, 0.42); }
+.admin-chip--green { color: #bbf7d0; background: rgba(34, 197, 94, 0.16); border-color: rgba(34, 197, 94, 0.45); }
+.admin-chip--amber { color: #fde68a; background: rgba(245, 158, 11, 0.16); border-color: rgba(245, 158, 11, 0.45); }
+.admin-chip--red { color: #fecaca; background: rgba(239, 68, 68, 0.16); border-color: rgba(239, 68, 68, 0.45); }
+.admin-chip--slate { color: rgba(255, 255, 255, 0.75); background: rgba(255, 255, 255, 0.06); border-color: rgba(255, 255, 255, 0.18); }
+
+html[data-theme="light"] .admin-chip--violet { color: #5b21b6; background: #f5f3ff; border-color: #ddd6fe; }
+html[data-theme="light"] .admin-chip--sky { color: #075985; background: #f0f9ff; border-color: #bae6fd; }
+html[data-theme="light"] .admin-chip--emerald { color: #065f46; background: #ecfdf5; border-color: #a7f3d0; }
+html[data-theme="light"] .admin-chip--indigo { color: #3730a3; background: #eef2ff; border-color: #c7d2fe; }
+html[data-theme="light"] .admin-chip--green { color: #166534; background: #f0fdf4; border-color: #bbf7d0; }
+html[data-theme="light"] .admin-chip--amber { color: #92400e; background: #fffbeb; border-color: #fde68a; }
+html[data-theme="light"] .admin-chip--red { color: #991b1b; background: #fef2f2; border-color: #fecaca; }
+html[data-theme="light"] .admin-chip--slate { color: #334155; background: #f8fafc; border-color: #e2e8f0; }
+
+/* ---------------- Bars / ladder ---------------- */
+
+.admin-bar-track {
+  position: relative;
+  height: 0.5rem;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--admin-surface-strong);
+}
+.admin-bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #8b5cf6, #d946ef);
+  transition: width 180ms ease-out;
+}
+.admin-bar-fill--muted {
+  background: rgba(148, 163, 184, 0.55);
+}
+
+.admin-ladder-dot {
+  position: absolute;
+  top: 50%;
+  width: 0.75rem;
+  height: 0.75rem;
+  border-radius: 999px;
+  transform: translate(-50%, -50%);
+  border: 2px solid var(--admin-th-bg);
+}
+
+/* ---------------- Misc ---------------- */
+
+.admin-mark {
+  border-radius: 3px;
+  background: var(--admin-mark);
+  color: inherit;
+  padding: 0 1px;
+}
+
+.admin-amber-outline {
+  box-shadow: inset 0 0 0 1px rgba(245, 158, 11, 0.65);
+}
+.admin-table tr.admin-amber-outline td:first-child {
+  box-shadow: inset 3px 0 0 rgba(245, 158, 11, 0.85);
+}
+
+.admin-spinner {
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 999px;
+  border: 2px solid var(--admin-line);
+  border-top-color: rgba(167, 139, 250, 0.95);
+  animation: admin-spin 0.75s linear infinite;
+}
+.admin-spinner--sm {
+  width: 0.875rem;
+  height: 0.875rem;
+  border-width: 2px;
+}
+@keyframes admin-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.admin-dropzone {
+  border: 1.5px dashed var(--admin-line);
+  border-radius: 0.875rem;
+  background: var(--admin-surface);
+  transition: border-color 150ms ease, background-color 150ms ease;
+}
+.admin-dropzone.is-active {
+  border-color: rgba(167, 139, 250, 0.8);
+  background: rgba(139, 92, 246, 0.1);
+}
+
+.admin-code {
+  border-radius: 0.5rem;
+  border: 1px solid var(--admin-line);
+  background: var(--admin-surface-strong);
+  padding: 0.125rem 0.375rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.75rem;
+}
+
+.admin-pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.75rem;
+  line-height: 1.6;
+  color: var(--admin-fg);
+}
+
+.admin-alert {
+  border-radius: 0.75rem;
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  background: rgba(127, 29, 29, 0.25);
+  padding: 0.625rem 0.75rem;
+  font-size: 0.8125rem;
+  color: var(--admin-danger);
+}
+.admin-alert--warning {
+  border-color: rgba(245, 158, 11, 0.4);
+  background: rgba(120, 53, 15, 0.22);
+  color: var(--admin-warning);
+}
+.admin-alert--info {
+  border-color: var(--admin-line);
+  background: var(--admin-surface);
+  color: var(--admin-muted);
+}
+html[data-theme="light"] .admin-alert {
+  background: #fef2f2;
+  border-color: #fecaca;
+}
+html[data-theme="light"] .admin-alert--warning {
+  background: #fffbeb;
+  border-color: #fde68a;
+}
+html[data-theme="light"] .admin-alert--info {
+  background: #f8fafc;
+  border-color: #e2e8f0;
+}
+
+/* Empty-list text inherits white from index.css; keep it readable in light theme. */
+html[data-theme="light"] .admin-root .studio-empty-list {
+  border-color: #e2e8f0;
+  color: #64748b;
+}
+html[data-theme="light"] .admin-root .studio-panel-kicker,
+html[data-theme="light"] .admin-root .studio-panel-subtitle {
+  color: #475569;
+}
+html[data-theme="light"] .admin-root .studio-panel-header,
+html[data-theme="light"] .admin-root .studio-panel-footer {
+  border-color: #e2e8f0;
+}
+
+/* ConfirmDialog (designer component, reused as-is) gets readable colours in both themes. */
+.admin-dialog-host [role="dialog"] > div {
+  background: var(--admin-dialog-bg);
+  color: var(--admin-fg);
+}
+.admin-dialog-host [role="dialog"] p {
+  color: var(--admin-muted);
+}
+html[data-theme="light"] .admin-dialog-host [role="dialog"] > div {
+  border-color: #e2e8f0;
+}
+html[data-theme="light"] .admin-dialog-host [role="dialog"] button:first-child {
+  border-color: #cbd5e1;
+  color: #334155;
+}
+html[data-theme="light"] .admin-dialog-host [role="dialog"] button:last-child {
+  color: #fff;
+}
+
+/* Our own modal (space form). */
+.admin-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(4px);
+}
+.admin-modal {
+  display: flex;
+  max-height: calc(100dvh - 2rem);
+  width: 100%;
+  max-width: 36rem;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 1rem;
+  border: 1px solid var(--admin-line);
+  background: var(--admin-dialog-bg);
+  color: var(--admin-fg);
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+}
+
+.admin-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .admin-spinner {
+    animation-duration: 1.5s;
+  }
+}
+
+/* Negotiation conversation (client left; agent / admin / auto replies right) */
+.admin-convo {
+  max-height: 22rem;
+  overflow-y: auto;
+  padding: 0.25rem 0.125rem;
+}
+.admin-convo-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.admin-convo-row {
+  display: flex;
+}
+.admin-convo-row--in {
+  justify-content: flex-start;
+}
+.admin-convo-row--out {
+  justify-content: flex-end;
+}
+.admin-convo-bubble {
+  max-width: min(32rem, 85%);
+  min-width: 0;
+  border: 1px solid var(--admin-line);
+  border-radius: 0.875rem;
+  padding: 0.5rem 0.75rem;
+  background: var(--admin-surface-strong);
+}
+.admin-convo-bubble--client {
+  background: var(--admin-surface);
+}
+.admin-convo-bubble--admin {
+  border-color: rgba(139, 92, 246, 0.55);
+}
+.admin-convo-bubble--auto {
+  border-style: dashed;
+}
+.admin-convo-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  font-size: 11px;
+  color: var(--admin-faint);
+}
+.admin-convo-bubble--admin .admin-convo-meta span {
+  color: #a78bfa;
+}
+html[data-theme="light"] .admin-convo-bubble--admin .admin-convo-meta span {
+  color: #6d28d9;
+}
+.admin-convo-text {
+  margin: 0.125rem 0 0;
+  font-size: 0.875rem;
+  color: var(--admin-fg);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.admin-convo-marker {
+  align-self: center;
+  font-size: 11px;
+  color: var(--admin-faint);
+  text-align: center;
+  padding: 0.125rem 0.5rem;
+}
