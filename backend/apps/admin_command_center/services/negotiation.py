@@ -118,8 +118,9 @@ def _when(value: str) -> datetime:
     return parsed.replace(tzinfo=None, microsecond=0)
 
 
-# Within the same second: a takeover precedes the messages it affects, a hand-back follows them.
-_SAME_SECOND_ORDER = {"takeover": 0, "turn": 1, "release": 2}
+# Within the same second: the original request comes first, a takeover precedes the messages
+# it affects, and a hand-back follows them.
+_SAME_SECOND_ORDER = {"request": -1, "takeover": 0, "turn": 1, "release": 2}
 
 
 def conversation(rfp: RFPSubmission) -> dict:
@@ -139,9 +140,18 @@ def conversation(rfp: RFPSubmission) -> dict:
         for e in events
         if e.action == "negotiation.message"
     }
+    transcript = normalize_session(rfp.client_session_json).get("transcript", [])
     messages = []
+    # The client's first message becomes the request itself, so it isn't in the chat history.
+    request_text = (rfp.source_document_text or "").strip()
+    if request_text and not any(
+        t["role"] == "user" and t["text"].strip()[:200] == request_text[:200] for t in transcript
+    ):
+        messages.append(
+            {"who": "client", "by": None, "text": request_text, "at": rfp.created_at.isoformat(), "_order": "request"}
+        )
     previous = None
-    for turn in normalize_session(rfp.client_session_json).get("transcript", []):
+    for turn in transcript:
         key = (turn["role"], turn["text"], turn["at"])
         if key == previous:
             continue  # the same turn saved twice by two code paths

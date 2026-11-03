@@ -109,7 +109,10 @@ def test_conversation_shows_what_the_client_says_during_takeover(admin_client, a
     assert ("client", "Can you give us a discount?") in who_said
     assert ("admin", "We can include AV at no charge.") in who_said
     assert any(who == "auto" for who, _ in who_said)
-    assert body["messages"][0]["who"] == "system" and "took over" in body["messages"][0]["text"]
+    texts = [m["text"] for m in body["messages"]]
+    takeover_at = next(i for i, m in enumerate(body["messages"]) if m["who"] == "system")
+    assert "took over" in texts[takeover_at]
+    assert takeover_at < texts.index("Can you give us a discount?")
     admin_msg = next(m for m in body["messages"] if m["who"] == "admin")
     assert admin_msg["by"] == admin_user.email
 
@@ -135,3 +138,12 @@ def test_conversation_includes_streamed_ai_replies_once(admin_client, seeded_rfp
     # every client line is followed by a reply, and nothing is listed twice in a row
     pairs = list(zip(messages, messages[1:]))
     assert not any(a["who"] == b["who"] == "client" and a["text"] == b["text"] and a["at"] == b["at"] for a, b in pairs)
+
+
+@pytest.mark.django_db
+def test_conversation_starts_with_the_original_request_and_ai_summary(admin_client, seeded_rfp):
+    """On takeover the admin sees everything from the start, not only from the takeover."""
+    messages = admin_client.get(f"/api/admin-center/negotiations/{seeded_rfp.id}/conversation/").json()["messages"]
+    assert messages[0]["who"] == "client"
+    assert messages[0]["text"] == seeded_rfp.source_document_text
+    assert messages[1]["who"] == "agent"  # the summary the AI spoke after reading the request
