@@ -1,4 +1,5 @@
 import { AnimatePresence, motion } from "framer-motion";
+import ThinkingDotsLine from "./ThinkingDotsLine";
 
 export type CaptionLine = {
   id: string;
@@ -42,11 +43,11 @@ export default function VoiceAgentSubtitles({ lines, agentSpeaking, thinking, pr
           <motion.p
             key={userLine.id}
             initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 0.55, y: 0 }}
+            animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0 }}
-            className="text-xs text-white/70 text-center"
+            className="voice-caption-user text-center text-xs"
           >
-            <span className="text-cyan-400/80 mr-2">You</span>
+            <span className="voice-caption-user-label mr-2">You</span>
             {userLine.text}
           </motion.p>
         )}
@@ -61,17 +62,8 @@ export default function VoiceAgentSubtitles({ lines, agentSpeaking, thinking, pr
             exit={{ opacity: 0 }}
             className="flex flex-col items-center gap-2 max-w-md"
           >
-            <div className="flex items-center gap-2 text-xs text-cyan-200/80">
-              <span className="inline-flex gap-1">
-                {[0, 1, 2].map((i) => (
-                  <motion.span
-                    key={i}
-                    className="w-1.5 h-1.5 rounded-full bg-cyan-400"
-                    animate={{ opacity: [0.3, 1, 0.3], scale: [0.85, 1.1, 0.85] }}
-                    transition={{ duration: 1.2, repeat: Infinity, delay: i * 0.15 }}
-                  />
-                ))}
-              </span>
+            <div className="voice-caption-thinking flex items-center gap-2 text-xs">
+              <ThinkingDotsLine colorClassName="text-cyan-400" />
               {progressText || "Working on your request…"}
             </div>
           </motion.div>
@@ -83,10 +75,8 @@ export default function VoiceAgentSubtitles({ lines, agentSpeaking, thinking, pr
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -6 }}
-            className={`relative w-full rounded-2xl border px-4 py-3 text-center ${
-              agentSpeaking || agentLine.status === "speaking"
-                ? "border-cyan-400/40 bg-cyan-950/30 shadow-[0_0_24px_rgba(34,211,238,0.12)]"
-                : "border-white/10 bg-black/30"
+            className={`voice-caption-agent relative w-full rounded-2xl border px-4 py-3 text-center ${
+              agentSpeaking || agentLine.status === "speaking" ? "voice-caption-agent--live" : ""
             }`}
           >
             {(agentSpeaking || agentLine.status === "speaking") && (
@@ -96,10 +86,10 @@ export default function VoiceAgentSubtitles({ lines, agentSpeaking, thinking, pr
                 transition={{ duration: 1.8, repeat: Infinity, ease: "easeInOut" }}
               />
             )}
-            <p className="text-[10px] uppercase tracking-widest text-cyan-300/70 mb-1">
+            <p className="voice-caption-agent-label mb-1 text-[10px] uppercase tracking-widest">
               Assistant
             </p>
-            <p className="text-sm leading-relaxed text-white/95">
+            <p className="voice-caption-agent-body text-sm leading-relaxed">
               {visibleText(agentLine.text, agentLine.reveal)}
               {(thinking ||
                 agentSpeaking ||

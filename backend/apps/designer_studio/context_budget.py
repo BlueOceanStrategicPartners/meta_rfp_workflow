@@ -19,6 +19,9 @@ def _int_setting(name: str, default: int) -> int:
     return int(getattr(settings, name, default))
 
 
+from .preview_target_context import expand_user_turn_content_for_agent
+
+
 def trim_chat_history(history: list[dict]) -> list[dict[str, str]]:
     max_turns = _int_setting("DESIGNER_MAX_HISTORY_TURNS", DEFAULT_MAX_HISTORY_TURNS)
     max_chars = _int_setting("DESIGNER_MAX_TURN_CHARS", DEFAULT_MAX_TURN_CHARS)
@@ -27,8 +30,13 @@ def trim_chat_history(history: list[dict]) -> list[dict[str, str]]:
         role = turn.get("role", "user")
         if role not in {"user", "assistant"}:
             continue
-        content = str(turn.get("content", ""))[:max_chars]
-        if len(content) < len(str(turn.get("content", ""))):
+        raw = (
+            expand_user_turn_content_for_agent(turn)
+            if role == "user"
+            else str(turn.get("content", ""))
+        )
+        content = raw[:max_chars]
+        if len(content) < len(raw):
             content = content.rstrip() + "…"
         trimmed.append({"role": role, "content": content})
     return trimmed

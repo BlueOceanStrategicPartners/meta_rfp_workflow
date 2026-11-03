@@ -14,7 +14,7 @@ from apps.core.exceptions import TemplateValidationException
 from apps.guardrails.validators import sanitize_template_html, sanitize_template_js
 
 from .designer_chat_service import iter_designer_chat, run_designer_chat_sync, sse_line, sse_preamble
-from .designer_live_progress import get_live_progress, request_designer_agent_cancel
+from .designer_live_progress import get_live_progress, request_designer_agent_cancel, clear_live_progress
 from .design_agent import DesignerStudioAgent
 from .media_service import save_designer_asset
 from .models import (
@@ -265,6 +265,7 @@ class DesignerChatCancelView(APIView):
 
     def post(self, request):
         request_designer_agent_cancel(user_id=request.user.pk)
+        clear_live_progress(user_id=request.user.pk)
         return Response({"cancelled": True})
 
 

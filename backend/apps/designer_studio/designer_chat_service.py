@@ -296,87 +296,88 @@ def iter_designer_chat(
         uid = getattr(user, "pk", None)
         live_progress_user_id = uid
         begin_live_progress(user_id=uid)
+        try:
+            def on_work_step(step_id: str, status: str) -> None:
+                evt = _step_event(tracker, step_id, status)
+                progress_queue.put(evt)
+                patch_live_progress(user_id=uid, work_plan=evt[1]["steps"])
 
-        def on_work_step(step_id: str, status: str) -> None:
-            evt = _step_event(tracker, step_id, status)
-            progress_queue.put(evt)
-            patch_live_progress(user_id=uid, work_plan=evt[1]["steps"])
+            def on_tool_event(evt: dict[str, Any]) -> None:
+                progress_queue.put(("tool", evt))
+                patch_live_progress(user_id=uid, tool_step=evt)
 
-        def on_tool_event(evt: dict[str, Any]) -> None:
-            progress_queue.put(("tool", evt))
-            patch_live_progress(user_id=uid, tool_step=evt)
+            def on_todo_event(todos: list[dict[str, Any]]) -> None:
+                progress_queue.put(("todo", {"todos": todos}))
+                patch_live_progress(user_id=uid, agent_todos=todos)
 
-        def on_todo_event(todos: list[dict[str, Any]]) -> None:
-            progress_queue.put(("todo", {"todos": todos}))
-            patch_live_progress(user_id=uid, agent_todos=todos)
+            def on_preview_event(snap: dict[str, str]) -> None:
+                nonlocal preview_last_mono
+                now = time.monotonic()
+                if now - preview_last_mono < 2.5:
+                    return
+                preview_last_mono = now
+                progress_queue.put(("preview", snap))
+                patch_live_progress(user_id=uid, preview=snap)
 
-        def on_preview_event(snap: dict[str, str]) -> None:
-            nonlocal preview_last_mono
-            now = time.monotonic()
-            if now - preview_last_mono < 2.5:
-                return
-            preview_last_mono = now
-            progress_queue.put(("preview", snap))
-            patch_live_progress(user_id=uid, preview=snap)
+            chat_result: dict[str, Any] = {}
+            chat_error: list[BaseException] = []
 
-        chat_result: dict[str, Any] = {}
-        chat_error: list[BaseException] = []
+            def run_chat() -> None:
+                try:
+                    chat_result["value"] = agent.chat_turn(
+                        message=effective_message or "Update the proposal template.",
+                        history=history,
+                        html_markup=html_markup,
+                        css_stylesheet=css_stylesheet,
+                        js_script=js_script,
+                        attachment_block=attachment_block,
+                        map_knowledge_block=map_knowledge_block,
+                        preview_audit_block=preview_audit_block,
+                        preview_automation_block=preview_automation_block,
+                        agent_rules_block=agent_rules_block,
+                        user_id=getattr(user, "pk", None),
+                        template_id=str(template_id) if template_id else None,
+                        graph_thread_id=graph_thread_id or None,
+                        on_work_step=on_work_step,
+                        on_tool_event=on_tool_event,
+                        on_todo_event=on_todo_event,
+                        on_preview_event=on_preview_event,
+                    )
+                except BaseException as exc:  # pragma: no cover
+                    chat_error.append(exc)
+                    progress_queue.put(("error", {"message": str(exc)}))
 
-        def run_chat() -> None:
-            try:
-                chat_result["value"] = agent.chat_turn(
-                    message=effective_message or "Update the proposal template.",
-                    history=history,
-                    html_markup=html_markup,
-                    css_stylesheet=css_stylesheet,
-                    js_script=js_script,
-                    attachment_block=attachment_block,
-                    map_knowledge_block=map_knowledge_block,
-                    preview_audit_block=preview_audit_block,
-                    preview_automation_block=preview_automation_block,
-                    agent_rules_block=agent_rules_block,
-                    user_id=getattr(user, "pk", None),
-                    template_id=str(template_id) if template_id else None,
-                    graph_thread_id=graph_thread_id or None,
-                    on_work_step=on_work_step,
-                    on_tool_event=on_tool_event,
-                    on_todo_event=on_todo_event,
-                    on_preview_event=on_preview_event,
-                )
-            except BaseException as exc:  # pragma: no cover
-                chat_error.append(exc)
-                progress_queue.put(("error", {"message": str(exc)}))
-
-        worker = threading.Thread(target=run_chat, daemon=True)
-        worker.start()
-        last_progress = time.monotonic()
-        while worker.is_alive() or not progress_queue.empty():
-            if uid is not None and is_designer_agent_cancel_requested(user_id=uid):
-                break
-            try:
-                yield progress_queue.get(timeout=0.25)
-                last_progress = time.monotonic()
-            except queue.Empty:
-                if worker.is_alive() and time.monotonic() - last_progress >= _SSE_HEARTBEAT_SECONDS:
-                    yield ("heartbeat", {"ts": time.time()})
+            worker = threading.Thread(target=run_chat, daemon=True)
+            worker.start()
+            last_progress = time.monotonic()
+            while worker.is_alive() or not progress_queue.empty():
+                if uid is not None and is_designer_agent_cancel_requested(user_id=uid):
+                    break
+                try:
+                    yield progress_queue.get(timeout=0.25)
                     last_progress = time.monotonic()
-                continue
-        worker.join(timeout=0.5)
-        cancelled = uid is not None and is_designer_agent_cancel_requested(user_id=uid)
-        end_live_progress(user_id=uid)
-        if cancelled:
-            clear_designer_agent_cancel(user_id=uid)
-            yield ("cancelled", {"message": "Design agent stopped."})
-            return
-        if chat_error:
-            raise chat_error[0]
-        result = chat_result["value"]
-        result = _normalize_designer_chat_result(result)
-        if result.get("agent_cancelled"):
-            if uid is not None:
+                except queue.Empty:
+                    if worker.is_alive() and time.monotonic() - last_progress >= _SSE_HEARTBEAT_SECONDS:
+                        yield ("heartbeat", {"ts": time.time()})
+                        last_progress = time.monotonic()
+                    continue
+            worker.join(timeout=0.5)
+            cancelled = uid is not None and is_designer_agent_cancel_requested(user_id=uid)
+            if cancelled:
                 clear_designer_agent_cancel(user_id=uid)
-            yield ("cancelled", {"message": "Design agent stopped."})
-            return
+                yield ("cancelled", {"message": "Design agent stopped."})
+                return
+            if chat_error:
+                raise chat_error[0]
+            result = chat_result["value"]
+            result = _normalize_designer_chat_result(result)
+            if result.get("agent_cancelled"):
+                if uid is not None:
+                    clear_designer_agent_cancel(user_id=uid)
+                yield ("cancelled", {"message": "Design agent stopped."})
+                return
+        finally:
+            end_live_progress(user_id=uid)
 
         if "preview_audit" in {s["id"] for s in tracker.snapshot()}:
             if include_audit and preview_audit_block:
@@ -453,7 +454,11 @@ def iter_designer_chat(
             remaining.append("Fix finalize validation issues (pool edit pass)")
             result["remaining_items"] = remaining[:12]
 
-    display_message = effective_message
+    preview_target = data.get("preview_target")
+    has_preview_target = isinstance(preview_target, dict) and bool(preview_target)
+    display_message = (data.get("display_message") or "").strip()
+    if not display_message and not has_preview_target:
+        display_message = effective_message
     if assets:
         roles = classify_attachments(effective_message, assets)
         role_bits = []
@@ -461,12 +466,20 @@ def iter_designer_chat(
             r = roles.get(str(a.id), AttachmentRole.PROPOSAL_MEDIA)
             role_bits.append(f"{a.original_name} ({r.value})")
         names = ", ".join(role_bits)
-        display_message = f"{effective_message}\n[Attachments: {names}]".strip()
+        attachment_line = f"[Attachments: {names}]"
+        display_message = (
+            f"{display_message}\n{attachment_line}".strip()
+            if display_message
+            else attachment_line
+        )
 
     new_history = list(history)
     now = timezone.now().isoformat()
-    if display_message:
-        new_history.append({"role": "user", "content": display_message, "ts": now})
+    if display_message or has_preview_target:
+        user_turn: dict[str, Any] = {"role": "user", "content": display_message, "ts": now}
+        if has_preview_target:
+            user_turn["preview_target"] = preview_target
+        new_history.append(user_turn)
     new_history.append(
         {
             "role": "assistant",

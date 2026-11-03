@@ -26,3 +26,17 @@ def test_flags_app_route_hrefs():
     issues = collect_bad_proposal_link_issues(html)
     assert len(issues) == 1
     assert "/rooms" in issues[0]
+
+
+def test_flags_same_domain_absolute_urls():
+    html = (
+        '<a href="http://localhost:5173/client">Bad</a>'
+        '<a href="https://example.com/designer">Also bad</a>'
+        '<a href="https://hotel-brand.com/gallery">OK</a>'
+        '<a href="#rooms">Good</a>'
+    )
+    issues = collect_bad_proposal_link_issues(html)
+    joined = " ".join(issues)
+    assert "localhost:5173" in joined or "same domain" in joined.lower()
+    assert "/designer" in joined or "RFP Engine" in joined
+    assert not any("hotel-brand.com/gallery" in i for i in issues)

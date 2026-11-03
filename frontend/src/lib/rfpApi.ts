@@ -1,4 +1,4 @@
-import { cardsHaveExtraction } from "./rfpFlow";
+import { cardsHaveIdentifiedFields } from "./rfpFlow";
 import { apiFetch } from "./apiClient";
 
 export type CreateRfpSessionResult =
@@ -72,7 +72,7 @@ export async function waitForRfpCards(
   const delayMs = opts?.delayMs ?? 750;
   for (let i = 0; i < attempts; i += 1) {
     const cards = await fetchRfpCards(sessionId);
-    if (cardsHaveExtraction(cards)) return cards;
+    if (cardsHaveIdentifiedFields(cards)) return cards;
     await new Promise((r) => setTimeout(r, delayMs));
   }
   return fetchRfpCards(sessionId);

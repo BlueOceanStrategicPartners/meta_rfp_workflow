@@ -27,6 +27,7 @@ class RFPSubmission(models.Model):
     )
     verified_extraction_json = models.JSONField(default=dict)
     active_ui_cards_json = models.JSONField(default=dict)
+    client_session_json = models.JSONField(default=dict)
     selected_map_zones_json = models.JSONField(default=list)
     amber_conflict_fields_json = models.JSONField(default=list)
     sla_started_at = models.DateTimeField(null=True, blank=True)

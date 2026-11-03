@@ -35,8 +35,13 @@ class RFPListCreateView(generics.ListCreateAPIView):
                 defaults={"username": "demo_client", "role": UserRole.CLIENT},
             )
         text = (serializer.validated_data.get("source_document_text") or "").strip()
-        rfp = serializer.save(client=user, status=RFPStatus.EXTRACTING, source_document_text=text)
-        if _request_run_debate(self.request):
+        run_debate = _request_run_debate(self.request)
+        rfp = serializer.save(
+            client=user,
+            status=RFPStatus.EXTRACTING if run_debate else RFPStatus.AWAITING_USER_CARD_EDIT,
+            source_document_text=text,
+        )
+        if run_debate:
             enqueue_debate_pipeline(str(rfp.id))
 
     def create(self, request, *args, **kwargs):
@@ -45,7 +50,8 @@ class RFPListCreateView(generics.ListCreateAPIView):
         self.perform_create(serializer)
         rfp = serializer.instance
         rfp.refresh_from_db()
-        normalize_cards_for_ui(rfp)
+        run_debate = _request_run_debate(request)
+        normalize_cards_for_ui(rfp, fill_placeholders=run_debate)
         data = RFPSubmissionSerializer(rfp).data
         data["voice_intro"] = ""
         if _request_run_debate(request):

@@ -13,18 +13,11 @@ export default function PreviewAutomationIndicator({ state }: Props) {
     error: "Preview automation failed — using audit only",
   };
 
-  const colors: Record<Exclude<State, "idle">, string> = {
-    running: "text-cyan-300 border-cyan-400/40 bg-cyan-500/10",
-    used: "text-emerald-200 border-emerald-400/35 bg-emerald-500/10",
-    error: "text-amber-200 border-amber-400/35 bg-amber-500/10",
-  };
-
   const label = labels[state];
-  const color = colors[state];
 
   return (
     <span
-      className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium ${color}`}
+      className={`studio-preview-auto-pill studio-preview-auto-pill--${state} inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium`}
       title={label}
       aria-live="polite"
     >

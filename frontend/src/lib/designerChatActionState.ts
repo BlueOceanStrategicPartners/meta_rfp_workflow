@@ -1,6 +1,7 @@
 import type { AgentProgressItem, AgentWorkPlanStep } from "./designerChatStream";
 import type { ChatMessage, DesignerChatActionState } from "./designerApi";
 import { collapseCompletedExecutionTodos } from "./designerAgentTodos";
+import { sanitizeRestoredAgentTodos } from "./designerProgressState";
 
 export type RestoredDesignerActionUi = {
   partialProgress: {
@@ -127,7 +128,7 @@ export function restoreDesignerActionUi(history: ChatMessage[]): RestoredDesigne
     if (finalizeStuck) {
       agentTodos = [];
     } else {
-      agentTodos = agentTodos.filter((t) => t.status === "active" || t.status === "pending");
+      agentTodos = sanitizeRestoredAgentTodos(agentTodos);
     }
   }
 

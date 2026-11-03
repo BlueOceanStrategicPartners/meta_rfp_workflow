@@ -68,8 +68,8 @@ export default function App() {
       />
       <header className="app-shell-header" role="banner">
         <div className="app-shell-header__brand">
-          <span className="hidden text-white/90 sm:inline">RFP Engine</span>
-          <span className="hidden text-white/35 sm:inline">/</span>
+          <span className="app-shell-header__brand-title">RFP Engine</span>
+          <span className="app-shell-header__brand-sep">/</span>
           <nav className="app-nav-tabs" aria-label="Primary">
             {PRIMARY_NAV.map(({ to, label, Icon }) => (
               <NavLink key={to} to={to} className={navLinkClass(to)} end={to !== "/client"}>

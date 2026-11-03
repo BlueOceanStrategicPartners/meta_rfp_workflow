@@ -7,7 +7,7 @@ export default function BottomTriangleToggle({ open, onToggle }: Props) {
     <button
       type="button"
       onClick={onToggle}
-      className="text-cyan-300/80 hover:text-cyan-200"
+      className="client-composer-toggle"
       aria-label="Toggle composer"
     >
       <motion.div

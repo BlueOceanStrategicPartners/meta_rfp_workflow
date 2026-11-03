@@ -9,13 +9,16 @@ from apps.designer_studio.services import compile_template, deterministic_templa
 from apps.rfp_debate.meta_client import MetaModelClient
 
 from .template_alignment import collect_alignment_issues
+from .layout_spacing_validation import preview_automation_trailing_gap_issue
 from .placeholder_guidance import validation_placeholder_guidance
 
 VALIDATION_SYSTEM_PROMPT = (
     "You validate compiled hospitality proposal HTML/CSS/JS templates against the user's brief. "
     "Return JSON only: valid (boolean), issues (string array), summary (string). "
     "Check media embeds, nav/icon markup, CTA visibility (accept button must not use display:none), "
-    "responsive layout, JS safety, and that visible dates match the requested locale/format "
+    "responsive layout, trailing dead space (no large empty band below the last section/footer), "
+    "in-proposal links (href=\"#section-id\" only — no /client, /designer, or same-domain http URLs), "
+    "JS safety, and that visible dates match the requested locale/format "
     "(U.S. MM/DD/YYYY vs ISO) when the brief mentions it. "
     "Template HTML uses {{binding_tokens}} in source — that is correct; do not flag tokens as "
     "'unresolved' or 'not verifiable' in the template source. "
@@ -200,21 +203,23 @@ def gather_chat_validation_issues(
             message=message,
             history=history,
         )
-        if review.get("valid"):
-            return []
-        return list(review.get("issues") or [])
+    else:
+        review = validate_template_like_button(
+            html=result.get("html_markup") or "",
+            css=result.get("css_stylesheet") or "",
+            js=result.get("js_script") or "",
+            message=message,
+            history=history,
+            client=client,
+        )
 
-    review = validate_template_like_button(
-        html=result.get("html_markup") or "",
-        css=result.get("css_stylesheet") or "",
-        js=result.get("js_script") or "",
-        message=message,
-        history=history,
-        client=client,
-    )
-    if review.get("valid"):
-        return []
-    return list(review.get("issues") or [])
+    issues: list[str] = []
+    if not review.get("valid"):
+        issues = list(review.get("issues") or [])
+    gap_issue = preview_automation_trailing_gap_issue(result.get("preview_automation_report"))
+    if gap_issue and gap_issue not in issues:
+        issues.append(gap_issue)
+    return issues
 
 
 def should_skip_post_executor_validation(result: dict[str, Any]) -> bool:

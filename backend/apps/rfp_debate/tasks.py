@@ -85,6 +85,11 @@ def run_debate_pipeline(rfp_id: str) -> dict:
     rfp.refresh_from_db()
     normalize_cards_for_ui(rfp)
 
+    from apps.negotiation_agent.client_session_memory import sync_clarifications_from_cards
+
+    sync_clarifications_from_cards(rfp)
+    rfp.save(update_fields=["client_session_json"])
+
     overview = (rfp.active_ui_cards_json or {}).get("event_overview") or {}
     if overview.get("company_name"):
         try:
@@ -97,6 +102,11 @@ def run_debate_pipeline(rfp_id: str) -> dict:
         str(rfp.id),
         "cards_patch",
         {"cards": rfp.active_ui_cards_json, "partial_consensus": partial},
+    )
+    broadcast_rfp(
+        str(rfp.id),
+        "client_session_patch",
+        {"session": rfp.client_session_json},
     )
     broadcast_rfp(
         str(rfp.id),

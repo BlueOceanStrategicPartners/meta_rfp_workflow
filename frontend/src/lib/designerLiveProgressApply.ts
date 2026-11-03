@@ -3,6 +3,7 @@ import { flushSync } from "react-dom";
 import type { AgentPreviewSnapshot, AgentToolStep, AgentWorkPlanStep } from "./designerChatStream";
 import { normalizeAgentWorkPlanSteps } from "./designerChatStream";
 import type { DesignerLiveProgress } from "./designerApi";
+import { liveProgressSnapshotHasWork } from "./designerLiveProgressSafety";
 import { isPlanningOnlyTodos } from "./designerAgentTodos";
 import { normalizeDesignerProgressLabel } from "./designerUserLabels";
 
@@ -23,9 +24,10 @@ export function applyDesignerLiveProgressSnapshot(
   snap: DesignerLiveProgress,
   handlers: LiveProgressApplyHandlers,
 ): boolean {
-  if (!snap.active) return false;
+  if (!liveProgressSnapshotHasWork(snap)) return false;
 
-  flushSync(() => {
+  try {
+    flushSync(() => {
     if (snap.work_plan?.length) {
       handlers.setAgentWorkPlan(normalizeAgentWorkPlanSteps(snap.work_plan));
       if (isPlanningOnlyTodos(handlers.agentTodosRef.current)) {
@@ -58,7 +60,11 @@ export function applyDesignerLiveProgressSnapshot(
         js_script: String(snap.preview?.js_script ?? ""),
       });
     }
-  });
+    });
+  } catch (err) {
+    console.error("[designer] live progress apply failed", err);
+    return false;
+  }
 
   return true;
 }

@@ -471,7 +471,13 @@ class MetaModelClient:
         ):
             user_msg = user_content.split("User:", 1)[-1].strip()
             return {
-                "reply": f"Got it. {user_msg[:100]}. You can edit the cards or open the venue map.",
+                "reply": f"Got it. {user_msg[:100]}. You can edit the summary cards or tell me meeting space details here.",
+            }
+        if fixture_kind == "voice_intake_classify":
+            return {
+                "confidence": 0.92,
+                "intent": "clarify",
+                "reply": "Thanks — how many nights will your group stay?",
             }
         if fixture_kind == "designer_asset_meta" or "media for a hospitality proposal" in system_prompt:
             return {
@@ -524,7 +530,7 @@ class MetaModelClient:
         if "User:" in user_content and "RFP session" in user_content:
             user_msg = user_content.split("User:", 1)[-1].strip()
             return {
-                "reply": f"Got it. {user_msg[:100]}. You can edit the cards or open the venue map.",
+                "reply": f"Got it. {user_msg[:100]}. You can edit the summary cards or tell me meeting space details here.",
             }
         return self._sample_extraction(
             mismatch="MISMATCH_FIXTURE" in user_content and "resolved" not in user_content.lower()

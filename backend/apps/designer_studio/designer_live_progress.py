@@ -1,17 +1,55 @@
 """In-memory live progress for design agent runs (poll fallback when SSE buffers)."""
 from __future__ import annotations
 
+import logging
 import threading
 import time
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 _lock = threading.Lock()
 _by_user: dict[str, dict[str, Any]] = {}
 _cancel_requested: dict[str, bool] = {}
 
+STALE_ACTIVE_SECONDS = 600.0
+GHOST_ACTIVE_SECONDS = 45.0
+
 
 def _user_key(user_id: Any) -> str:
     return str(user_id)
+
+
+def _snapshot_has_work(cur: dict[str, Any]) -> bool:
+    if cur.get("agent_todos") or cur.get("work_plan") or cur.get("tool_steps"):
+        return True
+    preview = cur.get("preview")
+    if isinstance(preview, dict):
+        if (preview.get("html_markup") or "").strip():
+            return True
+        if (preview.get("css_stylesheet") or "").strip():
+            return True
+    return False
+
+
+def _coerce_inactive_if_ghost(cur: dict[str, Any], *, now: float | None = None) -> bool:
+    """Clear active when flag is set but no work signals (prevents frontend ghost busy)."""
+    now = now if now is not None else time.time()
+    updated = float(cur.get("updated_at") or 0)
+    if not cur.get("active"):
+        return False
+    age = (now - updated) if updated else GHOST_ACTIVE_SECONDS + 1.0
+    if age > STALE_ACTIVE_SECONDS:
+        cur["active"] = False
+        cur["updated_at"] = now
+        logger.info("designer live progress: cleared stale active (age=%.0fs)", age)
+        return True
+    if not _snapshot_has_work(cur) and age > GHOST_ACTIVE_SECONDS:
+        cur["active"] = False
+        cur["updated_at"] = now
+        logger.info("designer live progress: cleared ghost active (no work, age=%.0fs)", age)
+        return True
+    return False
 
 
 def begin_live_progress(*, user_id: Any) -> None:
@@ -105,14 +143,23 @@ def end_live_progress(*, user_id: Any) -> None:
             cur["updated_at"] = time.time()
 
 
+def clear_live_progress(*, user_id: Any) -> None:
+    """Drop snapshot entirely (cancel / idle page load cleanup)."""
+    key = _user_key(user_id)
+    with _lock:
+        _by_user.pop(key, None)
+
+
 def get_live_progress(*, user_id: Any) -> dict[str, Any]:
     key = _user_key(user_id)
     with _lock:
         cur = _by_user.get(key)
         if not cur:
             return {"active": False, "agent_todos": [], "work_plan": [], "tool_steps": []}
+        _coerce_inactive_if_ghost(cur)
+        active = bool(cur.get("active"))
         out = {
-            "active": bool(cur.get("active")),
+            "active": active,
             "updated_at": cur.get("updated_at"),
             "agent_todos": list(cur.get("agent_todos") or []),
             "work_plan": list(cur.get("work_plan") or []),

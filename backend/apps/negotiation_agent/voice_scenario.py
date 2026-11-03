@@ -4,6 +4,7 @@ from __future__ import annotations
 import re
 
 from apps.rfp_debate.models import RFPSubmission
+from apps.negotiation_agent.client_group_context import resolve_stored_headcount
 
 # Internal card placeholders — never read aloud as a company name.
 _PLACEHOLDER_ORGANIZATIONS = frozenset(
@@ -72,6 +73,51 @@ def _date_phrase(check_in: str | None, check_out: str | None) -> str | None:
     return f"from {cin} through {cout}"
 
 
+def _mentions_meeting_space_topic(lower: str) -> bool:
+    if re.search(r"\bmeeting space\b", lower):
+        return True
+    if any(
+        w in lower
+        for w in (
+            "ballroom",
+            "breakout",
+            "function room",
+            "conference room",
+            "seating style",
+            "headcount",
+            "participants",
+        )
+    ):
+        return True
+    if re.search(r"\bvenue map\b|\bon the map\b|\bfloor\s*plan\b", lower):
+        return True
+    return False
+
+
+def _meeting_space_voice_reply(rfp: RFPSubmission) -> str:
+    cards = rfp.active_ui_cards_json or {}
+    meeting = cards.get("meeting_space") or {}
+    try:
+        headcount = int(meeting.get("headcount") or 0)
+    except (TypeError, ValueError):
+        headcount = 0
+    seating = (meeting.get("seating_style") or "classroom").replace("_", " ")
+    space_label = (
+        meeting.get("selected_space_name")
+        or meeting.get("space_name")
+        or meeting.get("room_name")
+        or ""
+    )
+    if headcount > 0:
+        base = f"I have about {headcount} guests in {seating} seating on your meeting space card."
+    else:
+        base = "Meeting space is on your summary cards on the right."
+    if space_label:
+        base += f" Selected area: {space_label}."
+    base += " Tell me headcount, seating, or the room you need and I'll update the card."
+    return base
+
+
 def build_autonomous_voice_intro(rfp: RFPSubmission, *, partial: bool = False) -> str:
     cards = rfp.active_ui_cards_json or {}
     overview = cards.get("event_overview", {})
@@ -90,6 +136,10 @@ def build_autonomous_voice_intro(rfp: RFPSubmission, *, partial: bool = False) -
         headcount_n = int(headcount) if headcount is not None else 0
     except (TypeError, ValueError):
         headcount_n = 0
+    if headcount_n <= 0:
+        stored = resolve_stored_headcount(rfp)
+        if stored:
+            headcount_n = stored
 
     parts: list[str] = []
 
@@ -133,7 +183,10 @@ def build_autonomous_voice_intro(rfp: RFPSubmission, *, partial: bool = False) -
                 + " on the cards or tell me here."
             )
 
-    parts.append("Say approve when you're ready, negotiate if you need different pricing, or ask to see the venue map.")
+    parts.append(
+        "Say approve when you're ready, negotiate if you need different pricing, "
+        "or tell me meeting space details to update on the cards."
+    )
     return " ".join(parts)
 
 
@@ -151,6 +204,10 @@ def generate_voice_assistant_reply(
 
     lower = cleaned.lower()
     if rfp:
+        from .client_group_context import ensure_group_size_on_cards
+
+        ensure_group_size_on_cards(rfp)
+    if rfp:
         from .voice_card_updates import VoiceDateValidationError, apply_voice_message_to_cards
 
         try:
@@ -165,9 +222,15 @@ def generate_voice_assistant_reply(
             raise
         if applied:
             rfp.refresh_from_db()
+            overview = applied.get("event_overview") or {}
+            if overview.get("check_in_date") and not overview.get("check_out_date"):
+                from .voice_intake import try_voice_intake_followup
+
+                follow = try_voice_intake_followup(rfp, cleaned)
+                if follow:
+                    return follow
             meeting = applied.get("meeting_space") or {}
             room = applied.get("room_block") or {}
-            overview = applied.get("event_overview") or {}
             bits: list[str] = []
             if overview.get("check_in_date") and overview.get("check_out_date"):
                 bits.append(
@@ -212,11 +275,8 @@ def generate_voice_assistant_reply(
                 )
             return "I'm refreshing your quote now — check the card on the right in a moment."
 
-        if "map" in lower or "ballroom" in lower or "venue" in lower:
-            return (
-                "I'll highlight the venue map for you. "
-                "The grand ballroom area is a strong fit for most corporate meetings."
-            )
+        if _mentions_meeting_space_topic(lower):
+            return _meeting_space_voice_reply(rfp)
         if any(
             w in lower
             for w in (
@@ -288,8 +348,8 @@ def quick_voice_ack(message: str) -> str:
                  r"september|october|november|december|\d{1,2}(st|nd|rd|th)?)\b", lower):
         bits.append("those dates")
 
-    if "map" in lower or "ballroom" in lower or "venue" in lower:
-        bits.append("the venue map")
+    if _mentions_meeting_space_topic(lower):
+        bits.append("meeting space on your cards")
 
     if bits:
         return "Got it — " + ", ".join(bits) + ". I'm pulling that together now."
@@ -299,12 +359,10 @@ def quick_voice_ack(message: str) -> str:
 
 
 def progressive_status_messages(message: str, *, rfp: RFPSubmission | None = None) -> list[str]:
-    """Mid-flight status lines for streaming UX."""
+    """Single mid-flight status line (avoid stacked pauses in the caption band)."""
     lower = message.lower()
-    lines = ["Reviewing dates, room block, and meeting needs…"]
+    if any(w in lower for w in ("next week", "suitable date", "availability", "visit")):
+        return ["Checking availability…"]
     if rfp and rfp.active_ui_cards_json:
-        lines.append("Updating your summary cards on the right…")
-    elif any(w in lower for w in ("room", "night", "headcount", "ballroom", "catering")):
-        lines.append("Matching your request to our packages…")
-    lines.append("Almost ready…")
-    return lines
+        return ["Updating your summary…"]
+    return ["One moment…"]

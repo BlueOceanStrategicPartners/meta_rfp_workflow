@@ -14,11 +14,23 @@ export type DesignerChatActionState = {
   dismissed?: boolean;
 };
 
+export type ChatPreviewTargetAttachment = {
+  tag: string;
+  id: string;
+  sectionId: string;
+  sectionLabel: string;
+  classSummary: string;
+  selectorHint: string;
+  textSnippet: string;
+};
+
 export type ChatMessage = {
   role: "user" | "assistant";
   content: string;
   ts?: string;
   action_state?: DesignerChatActionState;
+  /** Live preview point-to-select — shown as action card, expanded for agent on send. */
+  preview_target?: ChatPreviewTargetAttachment;
 };
 
 export type TemplateRevision = {
@@ -61,6 +73,8 @@ export async function authMe() {
 
 export type DesignerLiveProgress = {
   active: boolean;
+  /** Unix seconds from server when snapshot last changed. */
+  updated_at?: number;
   agent_todos?: AgentWorkPlanStep[];
   work_plan?: AgentWorkPlanStep[];
   tool_steps?: Array<{ tool?: string; label?: string; ok?: boolean; phase?: string }>;
@@ -271,7 +285,7 @@ export type PreviewAutomationReport = {
   error?: string;
   duration_ms: number;
   viewport: { w: number; h: number };
-  scroll: { docHeight: number; canScroll: boolean };
+  scroll: { docHeight: number; canScroll: boolean; trailingGapPx?: number; contentBottom?: number };
   elements: {
     heroVisible: boolean;
     ctaVisible: boolean;

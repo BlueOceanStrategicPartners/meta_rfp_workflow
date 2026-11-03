@@ -25,6 +25,7 @@ from .template_text_quality import (
     collect_bad_proposal_link_issues,
     collect_literal_escape_sequence_issues,
 )
+from .layout_spacing_validation import collect_trailing_whitespace_issues
 
 def build_preview_replacements(cards: dict | None = None) -> dict[str, str]:
     """JSON binding strings from seed or cards (Designer preview hydrates via runtime JS)."""
@@ -95,6 +96,7 @@ def deterministic_template_checks(html: str, css: str = "", js_script: str = "")
     issues.extend(collect_literal_escape_sequence_issues(html))
     issues.extend(collect_bad_proposal_link_issues(html))
     issues.extend(collect_placeholder_binding_issues(html))
+    issues.extend(collect_trailing_whitespace_issues(html, eff_css or css or ""))
 
     try:
         from apps.guardrails.validators import sanitize_template_js

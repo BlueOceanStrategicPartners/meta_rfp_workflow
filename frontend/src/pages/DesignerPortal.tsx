@@ -1,9 +1,16 @@
 import PreviewAutomationIndicator from "../components/designer/PreviewAutomationIndicator";
+import PreviewTargetHighlight from "../components/designer/PreviewTargetHighlight";
 import {
   runPreviewPanelAutomation,
   waitForPreviewIframe,
   shouldAttachPreviewAutomation,
 } from "../lib/designerPreviewAutomation";
+import {
+  composeMessageWithPreviewTarget,
+  type PreviewElementTarget,
+} from "../lib/designerPreviewElementPicker";
+import { previewTargetToAttachment } from "../lib/previewTargetChat";
+import { usePreviewElementPicker } from "../hooks/usePreviewElementPicker";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   KeyboardEvent,
@@ -32,8 +39,12 @@ import {
   collapseCompletedExecutionTodos,
   isPlanningOnlyTodos,
   PLANNING_WAIT_TODOS,
-  todosIndicateActiveRun,
 } from "../lib/designerAgentTodos";
+import { resolveAgentProgressUi } from "../lib/designerProgressState";
+import {
+  liveProgressSnapshotHasWork,
+  shouldResumeBusyFromLiveProgress,
+} from "../lib/designerLiveProgressSafety";
 import ConfirmDialog from "../components/designer/ConfirmDialog";
 import MediaLibraryDrawer from "../components/designer/MediaLibraryDrawer";
 import AgentRulesDialog from "../components/designer/AgentRulesDialog";
@@ -59,6 +70,7 @@ import TemplateIconButton, {
   IconPaperclip,
   IconMic,
   IconTabletDevice,
+  IconTargetPick,
   IconUndo,
 } from "../components/designer/TemplateIconButton";
 import {
@@ -192,6 +204,10 @@ export default function DesignerPortal() {
   const [previewAutomationState, setPreviewAutomationState] = useState<
     "idle" | "running" | "used" | "error"
   >("idle");
+  const [previewPickMode, setPreviewPickMode] = useState(false);
+  const [previewElementTarget, setPreviewElementTarget] = useState<PreviewElementTarget | null>(
+    null,
+  );
   const [templateMenuOpenId, setTemplateMenuOpenId] = useState<string | null>(null);
   const [templateHistoryOpen, setTemplateHistoryOpen] = useState(false);
   const [showAgentRules, setShowAgentRules] = useState(false);
@@ -200,6 +216,8 @@ export default function DesignerPortal() {
   const chatRunIdRef = useRef(0);
   const chatAbortRef = useRef<AbortController | null>(null);
   const previewIframeRef = useRef<HTMLIFrameElement>(null);
+  const previewScrollRef = useRef<HTMLDivElement>(null);
+  const previewPickShieldRef = useRef<HTMLDivElement>(null);
   const livePreviewIframeHeight = useLivePreviewIframeScrollPort(previewIframeRef, previewDoc);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -239,12 +257,37 @@ export default function DesignerPortal() {
     setSnackbar({ message, tone: tone ?? inferSnackbarTone(message) });
   }, []);
 
+  const { hoverBox: previewHoverBox, lockedBox: previewLockedBox } = usePreviewElementPicker({
+    iframeRef: previewIframeRef,
+    scrollRef: previewScrollRef,
+    shieldRef: previewPickShieldRef,
+    active: previewPickMode && Boolean(previewDoc),
+    lockedTarget: previewElementTarget,
+    previewDoc,
+    onSelect: (target) => {
+      setPreviewElementTarget(target);
+      setPreviewPickMode(false);
+      showSnackbar("Section selected — describe what to change in the composer.", "success");
+      window.requestAnimationFrame(() => textareaRef.current?.focus());
+    },
+  });
+
   const dismissSnackbar = useCallback(() => setSnackbar(null), []);
 
-  const agentWorkingPreviewDoc = useMemo(
-    () => compileLocalTemplatePreview(html, css, js, { thumbnail: true }),
-    [html, css, js]
+  const agentProgressUi = useMemo(
+    () =>
+      resolveAgentProgressUi({
+        busy,
+        agentTodos,
+        agentPartialProgress,
+      }),
+    [busy, agentTodos, agentPartialProgress],
   );
+
+  const agentWorkingPreviewDoc = useMemo(() => {
+    if (!agentProgressUi.showProgressIframe) return "";
+    return compileLocalTemplatePreview(html, css, js, { thumbnail: true });
+  }, [agentProgressUi.showProgressIframe, html, css, js]);
 
   const PREVIEW_REFRESH_MIN_MS = 1200;
   const previewRefreshRef = useRef<{
@@ -337,9 +380,14 @@ export default function DesignerPortal() {
     const restored = restoreDesignerActionUi(history);
     setAgentPartialProgress(restored.partialProgress);
     setClarifications(restored.clarifications);
-    setAgentTodos(restored.agentTodos);
-    if (restored.agentTodos.length > 0) {
-      agentTodosRef.current = restored.agentTodos;
+    let todos = restored.agentTodos;
+    if (isPlanningOnlyTodos(todos)) {
+      todos = [];
+    }
+    setAgentTodos(todos);
+    agentTodosRef.current = todos;
+    if (todos.length === 0) {
+      setAgentWorkPlan([]);
     }
   }, [history, busy]);
 
@@ -349,11 +397,19 @@ export default function DesignerPortal() {
     void (async () => {
       try {
         const snap = await fetchDesignerLiveProgress();
-        if (cancelled || !snap.active) return;
-        const handlers = liveProgressHandlers();
-        if (applyDesignerLiveProgressSnapshot(snap, handlers)) {
-          setBusy(true);
+        if (cancelled) return;
+        if (!snap.active) return;
+        if (!liveProgressSnapshotHasWork(snap)) {
+          await cancelDesignerAgentSession();
+          return;
         }
+        if (shouldResumeBusyFromLiveProgress(snap)) {
+          const handlers = liveProgressHandlers();
+          applyDesignerLiveProgressSnapshot(snap, handlers);
+          setBusy(true);
+          return;
+        }
+        await cancelDesignerAgentSession();
       } catch {
         /* optional */
       }
@@ -465,6 +521,10 @@ export default function DesignerPortal() {
 
   useEffect(() => {
     const onKey = (e: globalThis.KeyboardEvent) => {
+      if (e.key === "Escape" && previewPickMode) {
+        setPreviewPickMode(false);
+        return;
+      }
       if (e.key === "?" && !e.ctrlKey && !e.metaKey) {
         const t = e.target as HTMLElement;
         if (t.tagName !== "INPUT" && t.tagName !== "TEXTAREA") {
@@ -475,7 +535,7 @@ export default function DesignerPortal() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [previewPickMode]);
 
   useEffect(() => {
     if (!previewFullscreen) return;
@@ -584,8 +644,9 @@ export default function DesignerPortal() {
   }, [css, html, js, showSampleData]);
 
   useEffect(() => {
+    if (!authed) return;
     refreshPreview().catch(() => setPreviewDoc(""));
-  }, [refreshPreview]);
+  }, [authed, refreshPreview]);
 
   const uploadFiles = useCallback(async (files: FileList | File[]) => {
     for (const file of Array.from(files)) {
@@ -633,7 +694,7 @@ const PREVIEW_ISSUE_MESSAGE = /preview|not showing|close button|looks wrong|debu
 
   const sendMessage = async (textOverride?: string) => {
     const text = (textOverride ?? draft).trim();
-    if ((!text && attachments.length === 0) || busy) return;
+    if ((!text && attachments.length === 0 && !previewElementTarget) || busy) return;
 
     if (text && FLOORPLAN_UPLOAD_CHIP.test(text) && attachments.length === 0) {
       showSnackbar("Attach a floorplan image first (paperclip or drag-and-drop), then send.", "warning");
@@ -647,6 +708,7 @@ const PREVIEW_ISSUE_MESSAGE = /preview|not showing|close button|looks wrong|debu
     setError(null);
     setClarifications([]);
     setPreviewAutomationState("idle");
+    setPreviewPickMode(false);
     setAgentWorkPlan([]);
     setAgentTodos(PLANNING_WAIT_TODOS);
     agentTodosRef.current = PLANNING_WAIT_TODOS;
@@ -657,17 +719,29 @@ const PREVIEW_ISSUE_MESSAGE = /preview|not showing|close button|looks wrong|debu
     const abortController = new AbortController();
     chatAbortRef.current = abortController;
     const isActiveRun = () => runId === chatRunIdRef.current;
+    const pendingAttachments = [...attachments];
+    const pendingPreviewTarget = previewElementTarget;
+    const agentMessage =
+      composeMessageWithPreviewTarget(text, pendingPreviewTarget) ||
+      text ||
+      "(attachments only)";
     const pendingUser: ChatMessage = {
       role: "user",
-      content: text || "(attachments only)",
+      content: text,
       ts: new Date().toISOString(),
+      ...(pendingPreviewTarget
+        ? { preview_target: previewTargetToAttachment(pendingPreviewTarget) }
+        : {}),
     };
     setHistory((h) => [...h, pendingUser]);
     setDraft("");
-    const pendingAttachments = [...attachments];
     setAttachments([]);
+    setPreviewElementTarget(null);
     try {
-      const includeAudit = PREVIEW_ISSUE_MESSAGE.test(text) || shouldAttachPreviewAutomation(text, false);
+      const includeAudit =
+        PREVIEW_ISSUE_MESSAGE.test(text) ||
+        shouldAttachPreviewAutomation(text, false) ||
+        Boolean(pendingPreviewTarget);
       let automationReport: PreviewAutomationReport | null = null;
       if (includeAudit && (html || css || js)) {
         if (showSampleData) {
@@ -689,7 +763,11 @@ const PREVIEW_ISSUE_MESSAGE = /preview|not showing|close button|looks wrong|debu
 
       const data = await streamDesignerChat(
         {
-        message: text,
+        message: agentMessage,
+        display_message: text,
+        preview_target: pendingPreviewTarget
+          ? previewTargetToAttachment(pendingPreviewTarget)
+          : null,
         history: history,
         html_markup: html,
         css_stylesheet: css,
@@ -1185,6 +1263,28 @@ const PREVIEW_ISSUE_MESSAGE = /preview|not showing|close button|looks wrong|debu
       <span className="studio-preview-toolbar-divider" aria-hidden />
       <TemplateIconButton
         compact
+        label={
+          previewPickMode ? "Cancel point-to-select (Esc)" : "Point to a section in preview"
+        }
+        selected={previewPickMode}
+        disabled={!previewDoc || busy}
+        onClick={() => {
+          setPreviewPickMode((on) => {
+            const next = !on;
+            if (next) {
+              showSnackbar(
+                "Click any section or element in the live preview to attach it.",
+                "success",
+              );
+            }
+            return next;
+          });
+        }}
+      >
+        <IconTargetPick />
+      </TemplateIconButton>
+      <TemplateIconButton
+        compact
         label={showSampleData ? "Sample RFP data on" : "Sample RFP data off"}
         selected={showSampleData}
         onClick={() => setShowSampleData((v) => !v)}
@@ -1240,7 +1340,7 @@ const PREVIEW_ISSUE_MESSAGE = /preview|not showing|close button|looks wrong|debu
         >
           <div className="mx-auto flex h-full w-full min-h-0 min-w-0 justify-center">
             <div
-              className={`studio-live-preview-frame ${
+              className={`studio-live-preview-frame relative ${
                 fullscreen && previewWidth === "full" ? "" : "studio-live-preview-frame--rounded"
               }`}
               style={{
@@ -1249,7 +1349,10 @@ const PREVIEW_ISSUE_MESSAGE = /preview|not showing|close button|looks wrong|debu
               }}
             >
               {previewDoc ? (
-                <div className="studio-live-preview-scroll">
+                <div
+                  ref={previewScrollRef}
+                  className={`studio-live-preview-scroll${previewPickMode ? " studio-live-preview-scroll--pick" : ""}`}
+                >
                   <iframe
                     ref={previewIframeRef}
                     title="Proposal preview"
@@ -1257,6 +1360,13 @@ const PREVIEW_ISSUE_MESSAGE = /preview|not showing|close button|looks wrong|debu
                     sandbox="allow-scripts allow-same-origin"
                     srcDoc={previewDoc}
                     style={{ height: livePreviewIframeHeight ?? "100%" }}
+                  />
+                  <PreviewTargetHighlight
+                    hoverBox={previewHoverBox}
+                    lockedBox={previewLockedBox}
+                    pickMode={previewPickMode}
+                    contentHeight={livePreviewIframeHeight ?? 480}
+                    shieldRef={previewPickShieldRef}
                   />
                 </div>
               ) : (
@@ -1328,7 +1438,7 @@ const PREVIEW_ISSUE_MESSAGE = /preview|not showing|close button|looks wrong|debu
             <button type="button" onClick={newTemplate} className="studio-btn-secondary !min-h-0 px-2.5 py-1.5 text-[11px]">+ New</button>
           </div>
           <div className="studio-panel-body !pb-2">
-            <label className="mb-1.5 block text-[10px] font-medium uppercase tracking-wide text-white/40">Search templates</label>
+            <label className="studio-field-label mb-1.5 block text-[10px] font-medium uppercase tracking-wide">Search templates</label>
             <div className="relative">
               <span className="studio-field-search-icon" aria-hidden>
                 ⌕
@@ -1408,7 +1518,7 @@ const PREVIEW_ISSUE_MESSAGE = /preview|not showing|close button|looks wrong|debu
           <div className="studio-scroll min-h-0 flex-1 space-y-3 overflow-x-hidden overflow-y-auto px-[var(--studio-inset-x)] py-4">
             {history.length === 0 && (
               <div className="studio-chat-empty">
-                <p className="font-medium text-white/85">Start designing</p>
+                <p className="studio-chat-empty-title font-medium">Start designing</p>
                 <div className="mt-3 flex flex-wrap gap-2">
                   {SUGGESTED_PROMPTS.map((p) => (
                     <button key={p} type="button" className="studio-suggest-chip" onClick={() => void sendMessage(p)} disabled={busy}>{p}</button>
@@ -1434,11 +1544,8 @@ const PREVIEW_ISSUE_MESSAGE = /preview|not showing|close button|looks wrong|debu
               </div>
             )}
             <DesignerAgentProgress
-              active={
-                busy ||
-                Boolean(agentPartialProgress) ||
-                todosIndicateActiveRun(agentTodos)
-              }
+              active={agentProgressUi.progressActive}
+              showProgressIframe={agentProgressUi.showProgressIframe}
               steps={agentWorkPlan}
               tasks={agentTodos}
               previewDoc={agentWorkingPreviewDoc}
@@ -1478,6 +1585,26 @@ const PREVIEW_ISSUE_MESSAGE = /preview|not showing|close button|looks wrong|debu
             <div className="studio-composer-dropzone">
               <span aria-hidden>⬆</span>
               Drag & drop images or videos here
+            </div>
+          )}
+          {previewElementTarget && (
+            <div className="flex flex-wrap gap-2 px-[var(--studio-inset-x)] pb-2">
+              <div className="studio-preview-target-chip">
+                <IconTargetPick />
+                <span className="min-w-0 truncate">
+                  {previewElementTarget.sectionLabel ||
+                    previewElementTarget.textSnippet.slice(0, 48) ||
+                    "Selected section"}
+                </span>
+                <button
+                  type="button"
+                  className="ml-1 rounded px-1 text-white/70 hover:bg-white/10"
+                  aria-label="Clear preview target"
+                  onClick={() => setPreviewElementTarget(null)}
+                >
+                  ×
+                </button>
+              </div>
             </div>
           )}
           {attachments.length > 0 && (
@@ -1538,13 +1665,13 @@ const PREVIEW_ISSUE_MESSAGE = /preview|not showing|close button|looks wrong|debu
                   onInput={syncComposerTextareaHeight}
                   onKeyDown={onComposerKeyDown}
                   onPaste={onComposerPaste}
-                  placeholder="Message the design agent… @ to mention · paste screenshot to attach"
+                  placeholder="Message the design agent… use preview target icon · @ mention · paste screenshot"
                   disabled={busy}
                   aria-label="Message to design agent"
                 />
                 <motion.button
                   type="submit"
-                  disabled={busy || uploading}
+                  disabled={busy || uploading || (!draft.trim() && attachments.length === 0 && !previewElementTarget)}
                   className="studio-composer-send"
                   aria-label="Send message"
                   title="Send"
@@ -1557,7 +1684,7 @@ const PREVIEW_ISSUE_MESSAGE = /preview|not showing|close button|looks wrong|debu
               </div>
             </div>
             <p className="studio-composer-hint">
-              Enter to send · Shift+Enter for new line · paste screenshot in box to attach
+              Enter to send · Shift+Enter for new line · preview target button scopes edits to one section
             </p>
           </form>
       </section>

@@ -15,6 +15,8 @@ type Props = {
   steps: AgentWorkPlanStep[];
   tasks?: AgentWorkPlanStep[];
   previewDoc: string;
+  /** When false, never mount the WIP iframe (prevents duplicate Tailwind/doc execution). */
+  showProgressIframe?: boolean;
   continuation?: AgentContinuationPanel | null;
 };
 
@@ -68,6 +70,7 @@ export default function DesignerAgentProgress({
   steps,
   tasks = [],
   previewDoc,
+  showProgressIframe = false,
   continuation,
 }: Props) {
   const showCard = active || Boolean(continuation);
@@ -197,7 +200,7 @@ export default function DesignerAgentProgress({
             </>
           )}
 
-          {!continuation ? (
+          {showProgressIframe && active && !continuation && previewDoc.trim() ? (
             <>
               <p className="studio-progress-hint">
                 Live preview updates as each step completes.
