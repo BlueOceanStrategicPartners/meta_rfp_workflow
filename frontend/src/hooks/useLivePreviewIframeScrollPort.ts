@@ -1,13 +1,20 @@
 import { useEffect, useState, type RefObject } from "react";
-import { PROPOSAL_EMBED_SCROLL_PORT_CSS } from "../lib/proposalEmbedScrollChrome";
+import {
+  DESIGNER_LIVE_PREVIEW_VIEWPORT_CSS,
+  PROPOSAL_EMBED_SCROLL_PORT_CSS,
+} from "../lib/proposalEmbedScrollChrome";
 
-const SCROLL_PORT_STYLE = PROPOSAL_EMBED_SCROLL_PORT_CSS;
+export type LivePreviewScrollMode = "embed" | "viewport";
 
-function injectScrollPortStyle(doc: Document) {
-  if (doc.querySelector("[data-studio-scroll-port]")) return;
+const EMBED_SCROLL_PORT_STYLE = PROPOSAL_EMBED_SCROLL_PORT_CSS;
+const VIEWPORT_SCROLL_STYLE = DESIGNER_LIVE_PREVIEW_VIEWPORT_CSS;
+
+function injectPreviewStyle(doc: Document, mode: LivePreviewScrollMode) {
+  const attr = mode === "embed" ? "data-studio-scroll-port" : "data-studio-viewport-scroll";
+  if (doc.querySelector(`[${attr}]`)) return;
   const el = doc.createElement("style");
-  el.setAttribute("data-studio-scroll-port", "1");
-  el.textContent = SCROLL_PORT_STYLE;
+  el.setAttribute(attr, "1");
+  el.textContent = mode === "embed" ? EMBED_SCROLL_PORT_STYLE : VIEWPORT_SCROLL_STYLE;
   doc.head.appendChild(el);
 }
 
@@ -53,17 +60,25 @@ function measurePreviewHeight(doc: Document): number {
 
 const MAX_PREVIEW_IFRAME_HEIGHT_PX = 24_000;
 
-function syncPreviewIframe(doc: Document): number {
-  injectScrollPortStyle(doc);
+function syncEmbedPreviewIframe(doc: Document): number {
+  injectPreviewStyle(doc, "embed");
   flattenInternalScrollContainers(doc);
   const measured = measurePreviewHeight(doc);
   return Math.min(measured, MAX_PREVIEW_IFRAME_HEIGHT_PX);
 }
 
-/** Parent scrolls; iframe grows to content (avoids white OS scroll tracks inside srcDoc). */
+function syncViewportPreviewIframe(doc: Document) {
+  injectPreviewStyle(doc, "viewport");
+}
+
+/**
+ * embed — parent scrolls; iframe grows to content (client proposal embed).
+ * viewport — iframe fills panel; document scrolls inside (designer live preview).
+ */
 export function useLivePreviewIframeScrollPort(
   iframeRef: RefObject<HTMLIFrameElement | null>,
   srcDoc: string,
+  mode: LivePreviewScrollMode = "embed",
 ): number | undefined {
   const [height, setHeight] = useState<number | undefined>(undefined);
 
@@ -81,7 +96,11 @@ export function useLivePreviewIframeScrollPort(
       try {
         const doc = iframe.contentDocument;
         if (!doc) return;
-        const next = syncPreviewIframe(doc);
+        if (mode === "viewport") {
+          syncViewportPreviewIframe(doc);
+          return;
+        }
+        const next = syncEmbedPreviewIframe(doc);
         if (Math.abs(next - lastHeight) < 2) return;
         lastHeight = next;
         setHeight(next);
@@ -127,7 +146,7 @@ export function useLivePreviewIframeScrollPort(
       if (raf) cancelAnimationFrame(raf);
       if (debounceTimer) window.clearTimeout(debounceTimer);
     };
-  }, [iframeRef, srcDoc]);
+  }, [iframeRef, srcDoc, mode]);
 
-  return height;
+  return mode === "embed" ? height : undefined;
 }

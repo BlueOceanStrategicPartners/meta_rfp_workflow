@@ -216,7 +216,11 @@ export default function DesignerPortal() {
   const previewIframeRef = useRef<HTMLIFrameElement>(null);
   const previewScrollRef = useRef<HTMLDivElement>(null);
   const previewPickShieldRef = useRef<HTMLDivElement>(null);
-  const livePreviewIframeHeight = useLivePreviewIframeScrollPort(previewIframeRef, previewDoc);
+  const livePreviewIframeHeight = useLivePreviewIframeScrollPort(
+    previewIframeRef,
+    previewDoc,
+    "viewport",
+  );
   useLivePreviewIframeNavigationLock(previewIframeRef, previewDoc);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -1336,7 +1340,9 @@ const PREVIEW_ISSUE_MESSAGE = /preview|not showing|close button|looks wrong|debu
               {previewDoc ? (
                 <div
                   ref={previewScrollRef}
-                  className={`studio-live-preview-scroll${previewPickMode ? " studio-live-preview-scroll--pick" : ""}`}
+                  className={`studio-live-preview-scroll studio-live-preview-scroll--viewport${
+                    previewPickMode ? " studio-live-preview-scroll--pick" : ""
+                  }`}
                 >
                   <iframe
                     ref={previewIframeRef}
@@ -1344,7 +1350,11 @@ const PREVIEW_ISSUE_MESSAGE = /preview|not showing|close button|looks wrong|debu
                     className="studio-live-preview-iframe"
                     sandbox="allow-scripts allow-same-origin"
                     srcDoc={previewDoc}
-                    style={{ height: livePreviewIframeHeight ?? "100%" }}
+                    style={
+                      livePreviewIframeHeight
+                        ? { height: `${livePreviewIframeHeight}px` }
+                        : { height: "100%", minHeight: "100%" }
+                    }
                   />
                   <PreviewTargetHighlight
                     hoverBox={previewHoverBox}

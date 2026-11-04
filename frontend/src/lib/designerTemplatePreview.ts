@@ -1,6 +1,6 @@
 /** Client-side compile for library thumbnails (mirrors backend JSON binding seed). */
 import { compileBindingsInTemplate } from "./proposalBindingSamples";
-import { PROPOSAL_EMBED_SCROLL_PORT_CSS } from "./proposalEmbedScrollChrome";
+import { DESIGNER_LIVE_PREVIEW_VIEWPORT_CSS } from "./proposalEmbedScrollChrome";
 import { isolateProposalEmbedNavigation } from "./proposalPreviewNavigation";
 
 const PROPOSAL_BINDING_RUNTIME_TAG =
@@ -15,8 +15,8 @@ const THUMBNAIL_PREVIEW_SHELL_CSS =
   "display:none!important;background:transparent!important;width:0!important;height:0!important;" +
   "}";
 
-/** Live preview — scroll on the studio shell (see proposalEmbedScrollChrome). */
-const LIVE_PREVIEW_SCROLL_PORT_CSS = PROPOSAL_EMBED_SCROLL_PORT_CSS;
+/** Live preview — in-iframe scroll (matches “open in new tab” layout). */
+const LIVE_PREVIEW_SCROLL_PORT_CSS = DESIGNER_LIVE_PREVIEW_VIEWPORT_CSS;
 
 export type CompilePreviewOptions = {
   thumbnail?: boolean;

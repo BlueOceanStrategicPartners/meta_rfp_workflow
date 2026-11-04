@@ -1830,6 +1830,19 @@ body {
     scrollbar-color: rgba(148, 163, 184, 0.75) rgba(15, 23, 42, 0.85);
   }
 
+  /* Designer: scroll inside iframe so fixed/backdrop layouts match “open in new tab”. */
+  .studio-live-preview-scroll--viewport {
+    overflow: hidden;
+    background-color: transparent;
+  }
+
+  .studio-live-preview-scroll--viewport .studio-live-preview-iframe {
+    display: block;
+    height: 100%;
+    min-height: 100%;
+    width: 100%;
+  }
+
   .studio-live-preview-scroll::-webkit-scrollbar {
     width: 9px;
   }
