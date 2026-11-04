@@ -32,7 +32,7 @@ type Props = {
 };
 
 const COMPOSER_PANEL_BASE =
-  "client-composer-panel pointer-events-auto mx-auto flex w-[min(640px,calc(100vw-2rem))] items-end gap-2 overflow-visible rounded-[1.625rem] py-2 pl-3 pr-3.5 shadow-lg sm:py-2.5 sm:pl-3.5 sm:pr-4";
+  "client-composer-panel pointer-events-auto mx-auto flex w-[min(640px,calc(100vw-2rem))] items-center gap-2 overflow-visible rounded-[1.625rem] py-2 pl-3 pr-3.5 shadow-lg sm:py-2.5 sm:pl-3.5 sm:pr-4";
 
 /** Fixed bottom dock — same pill composer in intake and proposal (proposal adds back + mini orb). */
 export default function ComposerDock({
@@ -88,7 +88,7 @@ export default function ComposerDock({
                 whileHover={{ scale: 1.06, x: -2 }}
                 whileTap={{ scale: 0.94, x: 0 }}
                 transition={ICON_BTN_SPRING}
-                className="client-composer-back client-composer-icon-btn shrink-0"
+                className="client-composer-back client-composer-icon-btn shrink-0 self-center"
                 aria-label="Back to summary cards"
                 onClick={onBackFromProposal}
               >
@@ -110,7 +110,7 @@ export default function ComposerDock({
                 whileHover={{ scale: 1.06 }}
                 whileTap={{ scale: 0.94 }}
                 transition={ICON_BTN_SPRING}
-                className="client-composer-proposal-open flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-full pl-2.5 pr-3 text-[11px] font-semibold uppercase tracking-wide"
+                className="client-composer-proposal-open flex h-10 shrink-0 items-center justify-center gap-1.5 self-center rounded-full pl-2.5 pr-3 text-[11px] font-semibold uppercase tracking-wide"
                 aria-label="Open proposal"
                 onClick={onOpenProposal}
               >
@@ -126,7 +126,7 @@ export default function ComposerDock({
                 whileHover={{ scale: 1.06 }}
                 whileTap={{ scale: 0.94 }}
                 transition={ICON_BTN_SPRING}
-                className="client-composer-attach client-composer-icon-btn shrink-0"
+                className="client-composer-attach client-composer-icon-btn shrink-0 self-center"
                 aria-label="Start new RFP session"
                 onClick={onNewSession}
               >
@@ -141,7 +141,7 @@ export default function ComposerDock({
                 whileHover={{ scale: 1.06 }}
                 whileTap={{ scale: 0.94 }}
                 transition={ICON_BTN_SPRING}
-                className="client-composer-upload client-composer-icon-btn shrink-0"
+                className="client-composer-upload client-composer-icon-btn shrink-0 self-center"
                 aria-label="Upload RFP document"
                 onClick={() => fileRef.current?.click()}
               >
@@ -166,7 +166,7 @@ export default function ComposerDock({
               type="submit"
               disabled={!hasText}
               aria-label="Send message"
-              className="client-composer-send group relative flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full disabled:cursor-not-allowed disabled:opacity-45"
+              className="client-composer-send group relative flex h-10 w-10 shrink-0 items-center justify-center self-center overflow-hidden rounded-full disabled:cursor-not-allowed disabled:opacity-45"
               whileHover={hasText ? { scale: 1.04, y: -1 } : undefined}
               whileTap={hasText ? { scale: 0.94 } : undefined}
               transition={{ type: "spring", stiffness: 520, damping: 28 }}

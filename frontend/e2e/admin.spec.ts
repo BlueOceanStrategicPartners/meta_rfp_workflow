@@ -5,27 +5,29 @@ const ADMIN = { email: "admin@demo.local", password: "admin12345" };
 const DESIGNER = { email: "designer@demo.local", password: "demo12345" };
 
 async function signIn(page: Page, who: { email: string; password: string }) {
-  await page.goto("/admin");
-  await expect(page.getByText("Sign in with your admin account")).toBeVisible();
+  await page.goto("/login");
+  await expect(page.getByRole("heading", { name: "Sign in" })).toBeVisible();
   await page.locator('input[type="email"]').fill(who.email);
   await page.locator('input[type="password"]').fill(who.password);
   await page.getByRole("button", { name: /sign in with email/i }).click();
 }
 
-test("shows the admin sign-in form at /admin", async ({ page }) => {
+test("unauthenticated /admin redirects to unified sign-in", async ({ page }) => {
   await page.goto("/admin");
-  await expect(page.getByRole("heading", { name: "Admin Command Center" })).toBeVisible();
-  await expect(page.getByText("Sign in with your admin account")).toBeVisible();
+  await expect(page).toHaveURL(/\/login$/);
+  await expect(page.getByRole("heading", { name: "Sign in" })).toBeVisible();
 });
 
-test("rejects a designer account with a role message", async ({ page }) => {
+test("designer account opens the designer portal, not admin", async ({ page }) => {
   await signIn(page, DESIGNER);
-  await expect(page.getByText("Signed in as DESIGNER. Sign in with an admin account.")).toBeVisible();
+  await expect(page).toHaveURL(/\/designer$/);
+  await page.goto("/admin");
   await expect(page.getByRole("navigation", { name: "Admin modules" })).toHaveCount(0);
 });
 
 test("demo admin signs in and can visit every module from the rail", async ({ page }) => {
   await signIn(page, ADMIN);
+  await expect(page).toHaveURL(/\/admin$/);
   const rail = page.getByRole("navigation", { name: "Admin modules" });
   await expect(rail).toBeVisible();
   await expect(page.getByRole("heading", { name: "Today at a glance" })).toBeVisible();
@@ -43,11 +45,8 @@ test("demo admin signs in and can visit every module from the rail", async ({ pa
     await rail.getByRole("link", { name: new RegExp(`^${label}`) }).click();
     await expect(page).toHaveURL(new RegExp(`${path}$`));
     await expect(page.getByRole("heading", { name: heading })).toBeVisible();
-    // The Admin tab in the app header stays active on every sub-route.
-    await expect(page.locator(".app-nav-link-active")).toHaveText("Admin");
   }
 
-  // Unknown admin paths go back to the overview.
   await page.goto("/admin/does-not-exist");
   await expect(page).toHaveURL(/\/admin$/);
 });

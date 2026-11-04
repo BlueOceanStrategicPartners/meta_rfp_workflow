@@ -93,6 +93,7 @@ def normalize_session(raw: dict | None) -> dict[str, Any]:
                 "peak_rooms",
                 "room_nights",
                 "nights",
+                "needs_meeting_space",
             )
         }
     handoff = raw.get("turn_handoff")
@@ -102,6 +103,8 @@ def normalize_session(raw: dict | None) -> dict[str, Any]:
         normalized = normalize_turn_handoff(handoff)
         if normalized:
             base["turn_handoff"] = normalized
+    archived = raw.get("archived")
+    base["archived"] = archived is True or str(archived).lower() in {"1", "true", "yes"}
     return base
 
 
@@ -127,6 +130,8 @@ def append_session_event(
 
 def sync_clarifications_from_cards(rfp: RFPSubmission) -> dict[str, Any]:
     """Derive clarification chips and todos from cards + amber fields (Phase 3)."""
+    from apps.negotiation_agent.meeting_space_intent import meeting_space_wanted_for_cards
+
     session = normalize_session(rfp.client_session_json)
     cards = rfp.active_ui_cards_json or {}
     overview = cards.get("event_overview") or {}
@@ -165,7 +170,7 @@ def sync_clarifications_from_cards(rfp: RFPSubmission) -> dict[str, Any]:
             peak_only = int(room.get("peak_rooms") or 0)
         except (TypeError, ValueError):
             peak_only = 0
-        if peak_only <= 0:
+        if peak_only <= 0 and meeting_space_wanted_for_cards(cards, session):
             clarifications.append("Add meeting headcount on the cards")
             todos.append({"id": "headcount", "text": "Add meeting headcount", "status": "pending"})
 
@@ -342,6 +347,15 @@ def _sanitize_user_message_text(text: str) -> str:
 
 def record_voice_turn(rfp: RFPSubmission, user_message: str) -> None:
     cleaned = _sanitize_user_message_text(user_message)
+    if cleaned:
+        from .meeting_space_intent import (
+            try_apply_meeting_space_decline,
+            try_apply_meeting_space_request,
+        )
+
+        if try_apply_meeting_space_decline(rfp, cleaned) or try_apply_meeting_space_request(rfp, cleaned):
+            rfp.save(update_fields=["client_session_json", "active_ui_cards_json", "updated_at"])
+
     session = normalize_session(getattr(rfp, "client_session_json", None))
     if cleaned:
         transcript = session.get("transcript") or []

@@ -377,7 +377,11 @@ def build_binding_payloads_from_cards(
     )
 
     meeting_specs = seed["meeting_space_specs"]
-    if meeting:
+    if meeting.get("included") is False:
+        meeting_specs = empty_binding_payloads()["meeting_space_specs"]
+    elif meeting and (
+        meeting.get("headcount") or meeting.get("seating_style") or meeting.get("av")
+    ):
         catering_av = cards.get("catering_av") or {}
         meeting_specs = {
             "name": meeting.get("name") or meeting_specs.get("name"),

@@ -52,10 +52,12 @@ def _proposal_card(rfp: RFPSubmission) -> dict:
 
 def serialize_rfp_session_summary(rfp: RFPSubmission) -> dict:
     completed = rfp.status in COMPLETED_STATUSES
+    session = normalize_session(rfp.client_session_json)
     return {
         "id": str(rfp.id),
         "status": rfp.status,
         "completed": completed,
+        "archived": bool(session.get("archived")),
         "title": _session_title(rfp),
         "updated_at": rfp.updated_at.isoformat() if rfp.updated_at else "",
         "created_at": rfp.created_at.isoformat() if rfp.created_at else "",

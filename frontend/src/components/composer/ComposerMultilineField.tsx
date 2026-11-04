@@ -35,7 +35,7 @@ const ComposerMultilineField = forwardRef<HTMLTextAreaElement, Props>(function C
   const { canScroll, thumbHeight, thumbTop, scrollToPointer, remeasure } = useCustomScrollChrome(textareaRef);
 
   return (
-    <div className="client-custom-scroll client-composer-scroll min-w-0 flex-1">
+    <div className="client-custom-scroll client-composer-scroll min-w-0 flex-1 self-center">
       <textarea
         ref={textareaRef}
         rows={1}

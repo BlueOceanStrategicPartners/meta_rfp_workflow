@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 
-import type { MicPhase } from "../../hooks/useMuseVoiceTranscribe";
+import type { MicPhase } from "../../hooks/useBrowserVoiceTranscribe";
 import { useAppShell } from "../../context/AppShellContext";
 import ThinkingDotsLine from "../voice/ThinkingDotsLine";
 
@@ -110,7 +110,7 @@ export default function CentralVoiceOrb({
   const statusLine = (() => {
     if (showThinking) return { title: "Thinking", hint: null };
     if (agentSpeaking) return { title: "Speaking", hint: "Agent reply" };
-    if (micPhase === "connecting") return { title: "Loading", hint: "OmniASR worker…" };
+    if (micPhase === "connecting") return { title: "Starting", hint: "Voice input…" };
     if (micPhase === "paused") return { title: "Voice on", hint: "Paused for reply" };
     if (micLive) return { title: "Voice on", hint: "Tap to exit" };
     return { title: "Voice", hint: "Tap to talk" };

@@ -10,6 +10,8 @@ type Props = {
   className?: string;
   contentClassName?: string;
   children: ReactNode;
+  /** Bust layout measure when tab/filter changes (e.g. Active vs Archived). */
+  contentKey?: string;
   onScrollEdges?: (state: ScrollEdgeState) => void;
   /** Optional ref to the scrolling viewport (for programmatic scroll, e.g. proposal section nav). */
   viewportRef?: RefObject<HTMLDivElement | null>;
@@ -22,6 +24,7 @@ export default function CustomScrollArea({
   className = "",
   contentClassName = "",
   children,
+  contentKey,
   onScrollEdges,
   viewportRef: externalViewportRef,
 }: Props) {
@@ -51,7 +54,9 @@ export default function CustomScrollArea({
     if (!el) return;
     const ro = new ResizeObserver(measure);
     ro.observe(el);
-    if (el.firstElementChild) ro.observe(el.firstElementChild);
+    for (const child of el.children) {
+      ro.observe(child);
+    }
     el.addEventListener("scroll", measure, { passive: true });
     window.addEventListener("resize", measure);
     return () => {
@@ -59,7 +64,15 @@ export default function CustomScrollArea({
       el.removeEventListener("scroll", measure);
       window.removeEventListener("resize", measure);
     };
-  }, [measure, children]);
+  }, [measure, children, contentKey]);
+
+  useEffect(() => {
+    const el = viewportRef.current;
+    if (!el) return;
+    el.scrollTop = 0;
+    const id = window.requestAnimationFrame(() => measure());
+    return () => window.cancelAnimationFrame(id);
+  }, [contentKey, measure]);
 
   useEffect(() => {
     if (!externalViewportRef) return;

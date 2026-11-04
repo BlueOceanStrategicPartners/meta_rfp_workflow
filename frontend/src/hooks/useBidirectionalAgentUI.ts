@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { cardsHaveIdentifiedFields } from "../lib/rfpFlow";
 import type { ClientSessionState } from "../lib/clientSession";
 import type { CardSaveState } from "./useDebouncedCardPatch";
+import { primeSessionProposalPreviewCache } from "../components/client/ClientSessionProposalPreview";
 
 export type AgentMessage = { type: string; payload?: Record<string, unknown> };
 
@@ -63,7 +64,9 @@ export function useBidirectionalAgentUI(
         setClientSession(session);
       }
       if (msg.type === "proposal_html") {
-        setProposalHtml(String(msg.payload?.html || ""));
+        const html = String(msg.payload?.html || "");
+        setProposalHtml(html);
+        if (sessionId && html) primeSessionProposalPreviewCache(sessionId, html);
       }
       if (msg.type === "debate_progress") {
         setDebateRings((r) => Math.min(3, r + 1));

@@ -10,6 +10,7 @@ import {
 import { useDebouncedCardPatch } from "../../hooks/useDebouncedCardPatch";
 
 import type { ClientSessionState } from "../../lib/clientSession";
+import { sessionNeedsMeetingSpace } from "../../lib/rfpFlow";
 import ClientSessionTimeline from "./ClientSessionTimeline";
 import CustomScrollArea from "../ui/CustomScrollArea";
 import ClientSelect from "../ui/ClientSelect";
@@ -98,6 +99,7 @@ export default function AgentCardDeck({
 
   const clarifications = clientSession?.clarification_options || [];
   const todos = clientSession?.agent_todos || [];
+  const showMeetingCards = sessionNeedsMeetingSpace(clientSession, cards);
 
   return (
     <motion.aside
@@ -216,6 +218,8 @@ export default function AgentCardDeck({
         </div>
       </SideCard>
 
+      {showMeetingCards ? (
+        <>
       <SideCard title="Meeting space" delay={0.15}>
         <Field
           id="headcount"
@@ -248,6 +252,8 @@ export default function AgentCardDeck({
           className="mt-2"
         />
       </SideCard>
+        </>
+      ) : null}
 
       <ClientSessionTimeline session={clientSession} />
         </CustomScrollArea>

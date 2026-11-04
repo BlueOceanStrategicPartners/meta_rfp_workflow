@@ -28,6 +28,17 @@ def test_session_summary_completed(client_user):
 
 
 @pytest.mark.django_db
+def test_session_summary_archived_flag(client_user):
+    rfp = RFPSubmission.objects.create(
+        client=client_user,
+        status=RFPStatus.AWAITING_USER_CARD_EDIT,
+        client_session_json={"archived": True},
+    )
+    data = serialize_rfp_session_summary(rfp)
+    assert data["archived"] is True
+
+
+@pytest.mark.django_db
 def test_client_demo_user():
     user = ensure_client_demo_user(reset_password=True)
     assert user.email == CLIENT_DEMO_EMAIL

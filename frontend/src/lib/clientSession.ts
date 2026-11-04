@@ -18,4 +18,5 @@ export type ClientSessionState = {
   events?: { at?: string; type?: string; summary?: string }[];
   transcript?: ClientSessionTranscriptTurn[];
   turn_handoff?: ClientTurnHandoff;
+  intake?: Record<string, string>;
 };

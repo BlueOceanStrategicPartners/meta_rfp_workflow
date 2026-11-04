@@ -251,32 +251,6 @@ USE_SEAMLESS_FIXTURE = os.getenv("USE_SEAMLESS_FIXTURE", "false").lower() == "tr
 EDGE_NEURAL_TTS = os.getenv("EDGE_NEURAL_TTS", "true").lower() == "true"
 EDGE_NEURAL_VOICE = os.getenv("EDGE_NEURAL_VOICE", "en-US-AriaNeural")
 
-MUSE_VOICE_TRANSCRIBE_MODEL = os.getenv(
-    "MUSE_VOICE_TRANSCRIBE_MODEL", "muse-voice-transcribe-1.0"
-)
-MUSE_ASR_MODE = os.getenv("MUSE_ASR_MODE", "ENDPOINTING")
-
-# ASR: omniasr | faster_whisper | muse (cloud)
-ASR_BACKEND = os.getenv("ASR_BACKEND", "faster_whisper").lower()
-FASTER_WHISPER_MODEL = os.getenv("FASTER_WHISPER_MODEL", "small.en")
-FASTER_WHISPER_DEVICE = os.getenv("FASTER_WHISPER_DEVICE", "cpu")
-FASTER_WHISPER_COMPUTE_TYPE = os.getenv("FASTER_WHISPER_COMPUTE_TYPE", "int8")
-FASTER_WHISPER_LANGUAGE = os.getenv("FASTER_WHISPER_LANGUAGE", "en")
-OMNIASR_MODEL_HF = os.getenv("OMNIASR_MODEL_HF", "aadel4/omniASR-CTC-300M-v2")
-OMNIASR_DEVICE = os.getenv("OMNIASR_DEVICE", "cpu")
-# onnx = fast-omniasr + ONNX Runtime (no PyTorch; better alongside llama.cpp on GPU)
-# torch = transformers + aadel4/omniASR-CTC-300M-v2
-OMNIASR_RUNTIME = os.getenv("OMNIASR_RUNTIME", "onnx")
-OMNIASR_ONNX_MODEL = os.getenv("OMNIASR_ONNX_MODEL", "EmreAkgul/omniASR-CTC-300M-v2-ONNX")
-OMNIASR_ONNX_PRECISION = os.getenv("OMNIASR_ONNX_PRECISION", "fp16")
-OMNIASR_ONNX_THREADS = int(os.getenv("OMNIASR_ONNX_THREADS", "4"))
-OMNIASR_SPEECH_RMS = float(os.getenv("OMNIASR_SPEECH_RMS", "0.009"))
-# Pause length before end-of-turn (local faster-whisper / OmniASR PCM endpointing).
-OMNIASR_SILENCE_END_MS = int(os.getenv("OMNIASR_SILENCE_END_MS", "2400"))
-OMNIASR_PARTIAL_MS = int(os.getenv("OMNIASR_PARTIAL_MS", "0"))
-OMNIASR_MIN_UTTERANCE_MS = int(os.getenv("OMNIASR_MIN_UTTERANCE_MS", "400"))
-OMNIASR_MAX_UTTERANCE_MS = int(os.getenv("OMNIASR_MAX_UTTERANCE_MS", "45000"))
-
 MAX_DEBATE_ITERATIONS = int(os.getenv("MAX_DEBATE_ITERATIONS", "5"))
 
 # Pricing guardrails (Admin-configurable defaults)

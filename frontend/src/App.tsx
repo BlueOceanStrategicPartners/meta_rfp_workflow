@@ -1,62 +1,48 @@
 import { useState } from "react";
-import { NavLink, Route, Routes, useLocation, useNavigate } from "react-router-dom";
+import { Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import ConfirmDialog from "./components/designer/ConfirmDialog";
 import TemplateIconButton, { IconLogout, IconMoon, IconSun } from "./components/designer/TemplateIconButton";
-import {
-  IconNavAdmin,
-  IconNavClient,
-  IconNavDesigner,
-  IconNavSubtitles,
-} from "./components/AppNavIcons";
+import { IconNavSubtitles } from "./components/AppNavIcons";
 import { useAppShell } from "./context/AppShellContext";
 import { logoutDesigner } from "./lib/designerApi";
-import { logoutClient } from "./lib/clientApi";
 import ClientWorkspace from "./pages/ClientWorkspace";
 import DesignerPortal from "./pages/DesignerPortal";
 import AdminPortal from "./pages/AdminPortal";
-
-const PRIMARY_NAV = [
-  { to: "/client", label: "Client", Icon: IconNavClient },
-  { to: "/designer", label: "Designer", Icon: IconNavDesigner },
-  { to: "/admin", label: "Admin", Icon: IconNavAdmin },
-] as const;
+import UnifiedLoginPage from "./pages/UnifiedLoginPage";
 
 export default function App() {
-  const { theme, toggleTheme, designerAuthed, setDesignerAuthed, clientAuthed, setClientAuthed, clientSubtitlesEnabled, toggleClientSubtitles, clientProposalFullscreen } =
-    useAppShell();
+  const {
+    theme,
+    toggleTheme,
+    designerAuthed,
+    setDesignerAuthed,
+    clientAuthed,
+    setClientAuthed,
+    clientSubtitlesEnabled,
+    toggleClientSubtitles,
+    clientProposalFullscreen,
+  } = useAppShell();
   const location = useLocation();
   const navigate = useNavigate();
 
-  const onClient = location.pathname === "/" || location.pathname.startsWith("/client");
-
-  const navLinkClass =
-    (to: string) =>
-    ({ isActive }: { isActive: boolean }) => {
-      const active =
-        to === "/client" ? isActive || location.pathname === "/" : isActive;
-      return ["app-nav-link", active ? "app-nav-link-active" : "app-nav-link-inactive"].join(" ");
-    };
+  const onClient = location.pathname === "/client" || location.pathname.startsWith("/client/");
   const onStudio = location.pathname.startsWith("/designer");
   const onAdmin = location.pathname.startsWith("/admin");
+  const showLogout = clientAuthed || designerAuthed;
 
-  const studioLoginPath = onAdmin ? "/admin" : onClient ? "/client" : "/designer";
   const [confirmLogoutOpen, setConfirmLogoutOpen] = useState(false);
   const [logoutBusy, setLogoutBusy] = useState(false);
 
   const handleLogout = async () => {
     setLogoutBusy(true);
     try {
-      if (onClient && clientAuthed) {
-        await logoutClient();
-        setClientAuthed(false);
-      } else {
-        await logoutDesigner();
-        setDesignerAuthed(false);
-      }
+      await logoutDesigner();
+      setClientAuthed(false);
+      setDesignerAuthed(false);
     } finally {
       setConfirmLogoutOpen(false);
       setLogoutBusy(false);
-      navigate(studioLoginPath, { replace: true });
+      navigate("/login", { replace: true });
     }
   };
 
@@ -80,18 +66,9 @@ export default function App() {
       <header className={`app-shell-header ${clientProposalFullscreen ? "hidden" : ""}`} role="banner">
         <div className="app-shell-header__brand">
           <span className="app-shell-header__brand-title">RFP Engine</span>
-          <span className="app-shell-header__brand-sep">/</span>
-          <nav className="app-nav-tabs" aria-label="Primary">
-            {PRIMARY_NAV.map(({ to, label, Icon }) => (
-              <NavLink key={to} to={to} className={navLinkClass(to)} end={to === "/designer"}>
-                <Icon />
-                <span>{label}</span>
-              </NavLink>
-            ))}
-          </nav>
         </div>
         <div className="app-shell-header__actions studio-toolbar">
-          {onClient && (
+          {onClient && clientAuthed && (
             <TemplateIconButton
               compact
               label={clientSubtitlesEnabled ? "Hide subtitles" : "Show subtitles"}
@@ -109,17 +86,7 @@ export default function App() {
           >
             {theme === "dark" ? <IconSun /> : <IconMoon />}
           </TemplateIconButton>
-          {(onStudio || onAdmin) && designerAuthed && (
-            <TemplateIconButton
-              compact
-              label="Log out"
-              variant="danger"
-              onClick={() => setConfirmLogoutOpen(true)}
-            >
-              <IconLogout />
-            </TemplateIconButton>
-          )}
-          {onClient && clientAuthed && (
+          {showLogout && (onClient || onStudio || onAdmin) && (
             <TemplateIconButton
               compact
               label="Log out"
@@ -133,7 +100,8 @@ export default function App() {
       </header>
       <main className="min-h-0 flex-1 overflow-hidden">
         <Routes>
-          <Route path="/" element={<ClientWorkspace />} />
+          <Route path="/" element={<UnifiedLoginPage />} />
+          <Route path="/login" element={<UnifiedLoginPage />} />
           <Route path="/client" element={<ClientWorkspace />} />
           <Route path="/designer" element={<DesignerPortal />} />
           <Route path="/admin/*" element={<AdminPortal />} />

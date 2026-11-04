@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Navigate } from "react-router-dom";
 import ParticleConstellation from "../components/canvas3d/ParticleConstellation";
 import CentralVoiceOrb from "../components/canvas3d/CentralVoiceOrb";
 import ComposerDock from "../components/composer/ComposerDock";
@@ -7,25 +8,23 @@ import AgentAvailabilityTable from "../components/generative_ui/AgentAvailabilit
 import AgentCardDeck from "../components/generative_ui/AgentCardDeck";
 import ProposalTemplateRenderer from "../components/generative_ui/ProposalTemplateRenderer";
 import VoiceAgentSubtitles, { type CaptionLine } from "../components/voice/VoiceAgentSubtitles";
-import StudioPortalLogin from "../components/designer/StudioPortalLogin";
 import ClientSessionHistoryRail from "../components/client/ClientSessionHistoryRail";
-import { clearSessionProposalPreviewCache } from "../components/client/ClientSessionProposalPreview";
+import { primeSessionProposalPreviewCache } from "../components/client/ClientSessionProposalPreview";
 import { useVoiceOrbAudio } from "../hooks/useVoiceOrbAudio";
-import { useMuseVoiceTranscribe } from "../hooks/useMuseVoiceTranscribe";
+import { useBrowserVoiceTranscribe } from "../hooks/useBrowserVoiceTranscribe";
 import { useBidirectionalAgentUI } from "../hooks/useBidirectionalAgentUI";
 import { unlockBrowserAudio, primeAudioSync, useSeamlessM4TV2 } from "../hooks/useSeamlessM4TV2";
 import type { AgentUiComponent } from "../lib/agentUiComponents";
 import { useClientCardDeckVisibility } from "../hooks/useClientCardDeckVisibility";
 import { cardsHaveIdentifiedFields, messageIsSocialGreeting, quickVoiceAck, shouldEnsureRfpSession, shouldRunDebateExtraction } from "../lib/rfpFlow";
 import { createRfpSession, fetchRfpCards, renderClientProposal, userMessageConfirmsBooking, waitForRfpCards } from "../lib/rfpApi";
-import ClientMiniVoiceOrb from "../components/composer/ClientMiniVoiceOrb";
 import { streamAssistantReply } from "../lib/voiceChatStream";
 import { sanitizeClientMessage } from "../lib/sanitizeClientMessage";
 import type { ProposalInteractionPayload } from "../lib/proposalClientBridge";
 import {
   fetchClientRfpSession,
   listClientRfpSessions,
-  loginClient,
+  setClientRfpSessionArchived,
   type ClientRfpSessionSummary,
 } from "../lib/clientApi";
 import { useClientPortalAuth } from "../hooks/useClientPortalAuth";
@@ -37,13 +36,10 @@ function newCaptionId() {
 
 export default function ClientWorkspace() {
   const { clientSubtitlesEnabled, setClientProposalFullscreen } = useAppShell();
-  const { authed, bootstrapping, confirmSession } = useClientPortalAuth();
-  const [loginEmail, setLoginEmail] = useState("client@demo.local");
-  const [loginPassword, setLoginPassword] = useState("demo12345");
-  const [loginError, setLoginError] = useState<string | null>(null);
-  const [loginBusy, setLoginBusy] = useState(false);
+  const { authed, bootstrapping } = useClientPortalAuth();
   const [sessionSummaries, setSessionSummaries] = useState<ClientRfpSessionSummary[]>([]);
   const [sessionsLoading, setSessionsLoading] = useState(false);
+  const [archiveBusyId, setArchiveBusyId] = useState<string | null>(null);
   const [sessionCompleted, setSessionCompleted] = useState(false);
   const [composerOpen, setComposerOpen] = useState(true);
   const [proposalPresentation, setProposalPresentation] = useState(false);
@@ -256,6 +252,7 @@ export default function ClientWorkspace() {
       if (detail.completed) {
         const html = await renderClientProposal(id);
         if (html) {
+          primeSessionProposalPreviewCache(id, html);
           setProposalHtml(html);
           setProposalPresentation(true);
         }
@@ -272,6 +269,7 @@ export default function ClientWorkspace() {
     if (!sid) return;
     const html = await renderClientProposal(sid);
     if (html) {
+      primeSessionProposalPreviewCache(sid, html);
       setProposalHtml(html);
       setProposalPresentation(true);
     }
@@ -420,10 +418,10 @@ export default function ClientWorkspace() {
           if (userMessageConfirmsBooking(userMessage)) {
             const html = await renderClientProposal(sid);
             if (html) {
+              primeSessionProposalPreviewCache(sid, html);
               setProposalHtml(html);
               setProposalPresentation(true);
               setSessionCompleted(true);
-              clearSessionProposalPreviewCache(sid);
               void refreshSessions();
             }
           }
@@ -439,7 +437,7 @@ export default function ClientWorkspace() {
   askAssistantRef.current = askAssistant;
 
   const { startListening, pauseListening, resumeListening, stopListening, micPhase, isMicLive } =
-    useMuseVoiceTranscribe({
+    useBrowserVoiceTranscribe({
     onPartialTranscript: (text) => {
       if (!liveUserCaptionRef.current) {
         liveUserCaptionRef.current = appendCaption("user", text, "speaking");
@@ -473,7 +471,7 @@ export default function ClientWorkspace() {
     onError: (message) => {
       setStatusHint(message);
       const fatal =
-        /denied|failed to load|port 8000|Could not connect/i.test(message);
+        /denied|not supported|Could not start/i.test(message);
       if (fatal) setVoiceMode(false);
     },
     onLevels: (levels) => setMicLevels(levels),
@@ -571,6 +569,47 @@ export default function ClientWorkspace() {
     liveUserCaptionRef.current = null;
   }, [clearProposalHtml, hydrateSession, setCards]);
 
+  const handleArchiveSession = useCallback(
+    async (id: string, archived: boolean) => {
+      setArchiveBusyId(id);
+      try {
+        let hint: ClientRfpSessionSummary | undefined;
+        setSessionSummaries((prev) => {
+          hint = prev.find((s) => s.id === id);
+          return prev.map((s) => (s.id === id ? { ...s, archived } : s));
+        });
+        const { summary: updated, persisted } = await setClientRfpSessionArchived(id, archived, hint);
+        setSessionSummaries((prev) =>
+          prev.map((s) => (s.id === id ? { ...s, ...updated, archived } : s)),
+        );
+        if (persisted) {
+          const list = await listClientRfpSessions();
+          setSessionSummaries(list);
+        }
+        setStatusHint(
+          persisted
+            ? archived
+              ? "Session archived."
+              : "Session restored to Active."
+            : archived
+              ? "Session archived on this device. Restart scripts/dev-backend.ps1 to sync to the server."
+              : "Session restored on this device.",
+        );
+        if (archived && sessionIdRef.current === id) {
+          startNewSession();
+        }
+        return archived;
+      } catch (err) {
+        void refreshSessions();
+        setStatusHint(err instanceof Error ? err.message : "Could not update archive status.");
+        return null;
+      } finally {
+        setArchiveBusyId(null);
+      }
+    },
+    [refreshSessions, startNewSession],
+  );
+
   const handleProposalInteraction = useCallback(
     (payload: ProposalInteractionPayload) => {
       submitProposalInteraction({
@@ -610,31 +649,7 @@ export default function ClientWorkspace() {
   }
 
   if (!authed) {
-    return (
-      <StudioPortalLogin
-        title="Client portal"
-        subtitle="Sign in to save and resume your RFP sessions"
-        email={loginEmail}
-        password={loginPassword}
-        error={loginError}
-        busy={loginBusy}
-        onEmailChange={setLoginEmail}
-        onPasswordChange={setLoginPassword}
-        onSubmit={async () => {
-          setLoginBusy(true);
-          setLoginError(null);
-          try {
-            const session = await loginClient(loginEmail, loginPassword);
-            const ok = await confirmSession(session);
-            if (!ok) setLoginError("Could not confirm session. Try again.");
-          } catch (err) {
-            setLoginError(err instanceof Error ? err.message : "Login failed");
-          } finally {
-            setLoginBusy(false);
-          }
-        }}
-      />
-    );
+    return <Navigate to="/login" replace />;
   }
 
   return (
@@ -725,7 +740,9 @@ export default function ClientWorkspace() {
           activeSessionId={sessionId}
           loading={sessionsLoading}
           composerOpen={composerOpen}
+          archiveBusyId={archiveBusyId}
           onSelect={(id) => void activateSession(id)}
+          onArchive={handleArchiveSession}
         />
       ) : null}
       <div
@@ -748,18 +765,18 @@ export default function ClientWorkspace() {
           ) : null}
           <p className="text-xs text-center max-w-md">
             {isMicLive ? (
-              <span className="client-voice-status client-voice-status--active font-medium">● Listening · local ASR</span>
+              <span className="client-voice-status client-voice-status--active font-medium">● Listening · browser speech</span>
             ) : micPhase === "paused" && voiceMode ? (
               <span className="client-voice-status font-medium">● Voice mode · paused for reply</span>
             ) : micPhase === "connecting" && voiceMode ? (
-              <span className="client-voice-status font-medium">● Loading Whisper…</span>
+              <span className="client-voice-status font-medium">● Starting voice…</span>
             ) : voiceMode ? (
               <span className="client-voice-status font-medium">● Voice mode on</span>
             ) : agentSpeaking ? (
               <span className="client-voice-status client-voice-status--speaking animate-pulse font-medium">● Speaking</span>
             ) : (
               <span className="client-hint-muted">
-                {proposalPresentation ? "Proposal view · chat below" : "Tap the orb for voice · Whisper"}
+                {proposalPresentation ? "Proposal view · chat below" : "Tap the orb for voice · speak naturally"}
               </span>
             )}
           </p>
@@ -779,17 +796,6 @@ export default function ClientWorkspace() {
         onBackFromProposal={exitProposalView}
         showOpenProposal={sessionCompleted && !proposalPresentation}
         onOpenProposal={() => void openProposalView()}
-        leadingSlot={
-          proposalPresentation ? (
-            <ClientMiniVoiceOrb
-              agentSpeaking={agentSpeaking}
-              thinking={thinking}
-              voiceMode={voiceMode}
-              micLive={isMicLive}
-              onVoiceToggle={toggleVoiceMode}
-            />
-          ) : undefined
-        }
       />
       <WindowDragAndDropOverlay visible={dragging} onDrop={uploadFiles} />
     </div>

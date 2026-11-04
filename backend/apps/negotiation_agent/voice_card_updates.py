@@ -273,12 +273,18 @@ def parse_voice_card_patch(
     *,
     availability_window_start: date | None = None,
     availability_window_days: int = 7,
+    needs_meeting_space: bool = True,
 ) -> dict | None:
     """Return partial card payload to merge, or None if no structured update detected."""
     cleaned = message.strip()
     if not cleaned:
         return None
     lower = cleaned.lower()
+    from .meeting_space_intent import message_declines_meeting_space, meeting_space_exclusion_patch
+
+    if message_declines_meeting_space(cleaned):
+        return meeting_space_exclusion_patch()
+
     patch: dict = {}
 
     stay = parse_stay_dates_from_voice(cleaned)
@@ -333,11 +339,14 @@ def parse_voice_card_patch(
 
     headcount = _group_size_from_message(lower)
     if headcount and headcount > 0:
-        patch["meeting_space"] = {"headcount": headcount}
+        if needs_meeting_space:
+            patch["meeting_space"] = {"headcount": headcount, "included": True}
         if peak is None and re.search(
             r"\b(one|solo|single|solar)\s+room\b|\bper\s+guest\b|\bper\s+person\b|one participant needs one room|each one",
             lower,
         ):
+            patch.setdefault("room_block", {})["peak_rooms"] = headcount
+        elif not needs_meeting_space and peak is None:
             patch.setdefault("room_block", {})["peak_rooms"] = headcount
 
     if re.search(r"\bnights?\b", lower):
@@ -360,11 +369,11 @@ def parse_voice_card_patch(
         patch.setdefault("room_block", {})["total_room_nights"] = block_nights
 
     seating = parse_seating_style_from_voice(cleaned)
-    if seating:
+    if seating and needs_meeting_space:
         patch.setdefault("meeting_space", {})["seating_style"] = seating
 
     catering_av = parse_catering_av_from_voice(cleaned)
-    if catering_av:
+    if catering_av and needs_meeting_space:
         patch.setdefault("catering_av", {}).update(catering_av.get("catering_av") or {})
         if catering_av.get("meeting_space"):
             patch.setdefault("meeting_space", {}).update(catering_av["meeting_space"])
@@ -374,7 +383,14 @@ def parse_voice_card_patch(
 
 def apply_voice_message_to_cards(session_id: str, message: str) -> dict | None:
     """Persist voice corrections and re-price. Returns patch applied or None."""
+    from apps.rfp_debate.models import RFPSubmission
+
+    from .meeting_space_intent import meeting_space_wanted
+
     try:
+        rfp = RFPSubmission.objects.get(pk=session_id)
+        patch = parse_voice_card_patch(message, needs_meeting_space=meeting_space_wanted(rfp))
+    except RFPSubmission.DoesNotExist:
         patch = parse_voice_card_patch(message)
     except VoiceDateValidationError:
         raise

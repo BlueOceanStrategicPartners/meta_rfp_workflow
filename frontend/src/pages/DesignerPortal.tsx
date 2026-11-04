@@ -25,6 +25,7 @@ import {
 } from "react";
 import { flushSync } from "react-dom";
 import { createPortal } from "react-dom";
+import { Navigate } from "react-router-dom";
 import ChatMessageView from "../components/designer/ChatMessageView";
 import DesignerAgentProgress from "../components/designer/DesignerAgentProgress";
 import {
@@ -52,7 +53,6 @@ import TemplateLibraryCard from "../components/designer/TemplateLibraryCard";
 import TemplateVersionHistoryDialog from "../components/designer/TemplateVersionHistoryDialog";
 import ShortcutHelpModal from "../components/designer/ShortcutHelpModal";
 import StudioPortalBootSplash from "../components/designer/StudioPortalBootSplash";
-import StudioPortalLogin from "../components/designer/StudioPortalLogin";
 import StudioSnackbar, { inferSnackbarTone, type SnackbarTone } from "../components/designer/StudioSnackbar";
 import TemplateIconButton, {
   IconAgentRules,
@@ -68,7 +68,6 @@ import TemplateIconButton, {
   IconSampleData,
   IconSendArrow,
   IconPaperclip,
-  IconMic,
   IconTabletDevice,
   IconTargetPick,
   IconUndo,
@@ -82,7 +81,6 @@ import {
   cancelDesignerAgentSession,
   listMediaAssets,
   listTemplates,
-  loginDesigner,
   previewTemplate,
   restoreRevision,
   saveTemplate,
@@ -112,6 +110,8 @@ import {
 import { useStudioPortalAuth } from "../hooks/useStudioPortalAuth";
 import { useLivePreviewIframeScrollPort } from "../hooks/useLivePreviewIframeScrollPort";
 import { useLivePreviewIframeNavigationLock } from "../hooks/useLivePreviewIframeNavigationLock";
+import { useComposerSpeechDictation } from "../hooks/useComposerSpeechDictation";
+import ComposerVoiceDictationButton from "../components/composer/ComposerVoiceDictationButton";
 import { useAppShell } from "../context/AppShellContext";
 
 const ACCEPT = "image/*,video/*";
@@ -158,9 +158,7 @@ type SnackbarState = { message: string; tone: SnackbarTone };
 
 export default function DesignerPortal() {
   const { theme } = useAppShell();
-  const { authed, bootstrapping, confirmSession } = useStudioPortalAuth("designer");
-  const [email, setEmail] = useState("designer@demo.local");
-  const [password, setPassword] = useState("demo12345");
+  const { authed, bootstrapping } = useStudioPortalAuth("designer");
   const [templates, setTemplates] = useState<ProposalTemplate[]>([]);
   const [templateSearch, setTemplateSearch] = useState("");
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -184,7 +182,6 @@ export default function DesignerPortal() {
   const agentTodosRef = useRef<AgentWorkPlanStep[]>([]);
   const [snackbar, setSnackbar] = useState<SnackbarState | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [loginBusy, setLoginBusy] = useState(false);
   const [showSampleData, setShowSampleData] = useState(true);
   const [attachments, setAttachments] = useState<DesignerMediaAsset[]>([]);
   const [libraryAssets, setLibraryAssets] = useState<DesignerMediaAsset[]>([]);
@@ -442,6 +439,19 @@ export default function DesignerPortal() {
     const scrollable = contentHeight > maxHeight;
     el.classList.toggle("studio-composer-input--scroll", scrollable);
   }, []);
+
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
+
+  const { listening: voiceListening, toggle: toggleVoiceDictation, stop: stopVoiceDictation } =
+    useComposerSpeechDictation({
+      getText: () => draftRef.current,
+      setText: (text) => {
+        setDraft(text);
+        requestAnimationFrame(() => syncComposerTextareaHeight());
+      },
+      onError: (message) => setError(message),
+    });
 
   const refreshTemplates = useCallback(async () => {
     setTemplates(await listTemplates());
@@ -720,6 +730,7 @@ const FLOORPLAN_UPLOAD_CHIP = /upload.*floorplan|floorplan.*upload|attach.*floor
 const PREVIEW_ISSUE_MESSAGE = /preview|not showing|close button|looks wrong|debug|overlap|map always|why now/i;
 
   const sendMessage = async (textOverride?: string) => {
+    stopVoiceDictation();
     const text = (textOverride ?? draft).trim();
     if ((!text && attachments.length === 0 && !previewElementTarget) || busy) return;
 
@@ -1158,27 +1169,6 @@ const PREVIEW_ISSUE_MESSAGE = /preview|not showing|close button|looks wrong|debu
     window.open(URL.createObjectURL(blob), "_blank");
   };
 
-  const startVoice = () => {
-    type SpeechRecognitionCtor = new () => {
-      lang: string;
-      onresult: ((ev: { results: { [i: number]: { [j: number]: { transcript: string } } } }) => void) | null;
-      start: () => void;
-    };
-    const Rec = (window as unknown as { SpeechRecognition?: SpeechRecognitionCtor; webkitSpeechRecognition?: SpeechRecognitionCtor }).SpeechRecognition
-      || (window as unknown as { webkitSpeechRecognition?: SpeechRecognitionCtor }).webkitSpeechRecognition;
-    if (!Rec) {
-      setError("Voice input is not supported in this browser.");
-      return;
-    }
-    const rec = new Rec();
-    rec.lang = "en-US";
-    rec.onresult = (ev) => {
-      const t = ev.results[0][0].transcript;
-      setDraft((d) => (d ? `${d} ${t}` : t));
-    };
-    rec.start();
-  };
-
   const insertMention = (asset: DesignerMediaAsset) => {
     setDraft((d) => `${d}${d ? " " : ""}@${asset.original_name} `);
     if (!attachments.find((a) => a.id === asset.id)) {
@@ -1216,44 +1206,7 @@ const PREVIEW_ISSUE_MESSAGE = /preview|not showing|close button|looks wrong|debu
   }
 
   if (!authed) {
-    const runLogin = async (userEmail: string, userPassword: string) => {
-      setLoginBusy(true);
-      setError(null);
-      try {
-        const session = await loginDesigner(userEmail, userPassword);
-        const ok = await confirmSession(session);
-        if (!ok) {
-          setError("Signed in but session was not saved. Allow cookies for this site and try again.");
-        }
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Login failed.");
-      } finally {
-        setLoginBusy(false);
-      }
-  };
-
-  return (
-      <div className={`${shellClass} min-h-0 flex-1`}>
-        <StudioPortalLogin
-          title="Designing Studio"
-          subtitle="Build proposal templates with the design agent"
-          error={error}
-          email={email}
-          password={password}
-          busy={loginBusy}
-          onEmailChange={setEmail}
-          onPasswordChange={setPassword}
-          onSubmit={() => runLogin(email, password)}
-          onMockSso={async () => {
-            const demoEmail = "designer@demo.local";
-            const demoPass = "demo12345";
-            setEmail(demoEmail);
-            setPassword(demoPass);
-            await runLogin(demoEmail, demoPass);
-          }}
-        />
-      </div>
-    );
+    return <Navigate to="/login" replace />;
   }
 
   const renderPreviewToolbar = () => (
@@ -1674,18 +1627,15 @@ const PREVIEW_ISSUE_MESSAGE = /preview|not showing|close button|looks wrong|debu
                   >
                     <IconPaperclip />
                   </motion.button>
-                  <motion.button
-                    type="button"
-                    className="studio-composer-action"
-                    aria-label="Voice input"
-                    title="Voice input"
-                    onClick={startVoice}
-                    whileHover={{ scale: 1.05 }}
-                    whileTap={{ scale: 0.95 }}
-                    transition={{ type: "spring", stiffness: 520, damping: 28 }}
-                  >
-                    <IconMic />
-                  </motion.button>
+                  <ComposerVoiceDictationButton
+                    variant="designer"
+                    listening={voiceListening}
+                    disabled={busy}
+                    onToggle={() => {
+                      setError(null);
+                      toggleVoiceDictation();
+                    }}
+                  />
                 </div>
                 <input ref={fileInputRef} type="file" accept={ACCEPT} multiple className="hidden" onChange={(e) => e.target.files && uploadFiles(e.target.files)} />
                 <textarea

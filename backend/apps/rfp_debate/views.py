@@ -4,7 +4,8 @@ from rest_framework.views import APIView
 
 from apps.accounts_rbac.permissions import IsClientRole
 
-from .client_session_list import COMPLETED_STATUSES, serialize_rfp_session_summary
+from .session_archive import apply_session_archive, parse_archived_flag
+from .client_session_list import serialize_rfp_session_summary
 from .models import RFPSubmission, RFPStatus
 from .serializers import RFPSubmissionSerializer
 from .tasks import enqueue_debate_pipeline, run_debate_pipeline
@@ -77,6 +78,30 @@ class RFPSessionSummariesView(APIView):
             {"sessions": [serialize_rfp_session_summary(r) for r in rfps]}
         )
 
+    def post(self, request):
+        """Archive/unarchive when POST /api/rfp/<id>/archive/ is unavailable (older workers)."""
+        payload = request.data if isinstance(request.data, dict) else {}
+        session_id = payload.get("session_id") or payload.get("id")
+        if not session_id:
+            return Response({"detail": "session_id is required."}, status=status.HTTP_400_BAD_REQUEST)
+        rfp = RFPSubmission.objects.filter(pk=session_id, client=request.user).first()
+        if not rfp:
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        archived = parse_archived_flag(payload.get("archived", True))
+        return Response(apply_session_archive(rfp, archived))
+
+
+class RFPArchiveView(APIView):
+    permission_classes = [IsClientRole]
+
+    def post(self, request, pk):
+        rfp = RFPSubmission.objects.filter(pk=pk, client=request.user).first()
+        if not rfp:
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        payload = request.data if isinstance(request.data, dict) else {}
+        archived = parse_archived_flag(payload.get("archived", True))
+        return Response(apply_session_archive(rfp, archived))
+
 
 class RFPDetailView(generics.RetrieveAPIView):
     serializer_class = RFPSubmissionSerializer
@@ -84,6 +109,16 @@ class RFPDetailView(generics.RetrieveAPIView):
 
     def get_queryset(self):
         return RFPSubmission.objects.filter(client=self.request.user)
+
+    def patch(self, request, *args, **kwargs):
+        if "archived" not in request.data:
+            return Response(
+                {"detail": "Only archived is supported on PATCH."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        rfp = self.get_object()
+        archived = parse_archived_flag(request.data.get("archived"))
+        return Response(apply_session_archive(rfp, archived))
 
 
 class RFPStartDebateView(APIView):

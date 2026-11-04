@@ -106,6 +106,8 @@ def persist_group_size_to_intake(
 
 def ensure_group_size_on_cards(rfp: RFPSubmission) -> None:
     """Merge intake/transcript headcount onto cards when a later turn only updates dates."""
+    from .meeting_space_intent import meeting_space_wanted
+
     hc = resolve_stored_headcount(rfp)
     if not hc:
         return
@@ -114,9 +116,11 @@ def ensure_group_size_on_cards(rfp: RFPSubmission) -> None:
     meeting = dict(cards.get("meeting_space") or {})
     room = dict(cards.get("room_block") or {})
     changed = False
-    if int(meeting.get("headcount") or 0) != hc:
-        meeting["headcount"] = hc
-        changed = True
+    if meeting_space_wanted(rfp):
+        if int(meeting.get("headcount") or 0) != hc:
+            meeting["headcount"] = hc
+            meeting["included"] = True
+            changed = True
     if int(room.get("peak_rooms") or 0) != peak:
         room["peak_rooms"] = peak
         changed = True

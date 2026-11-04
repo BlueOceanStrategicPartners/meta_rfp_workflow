@@ -39,7 +39,10 @@ def normalize_cards_for_ui(rfp: RFPSubmission, *, fill_placeholders: bool = True
             room["peak_rooms"] = int(meeting["headcount"])
 
     if not meeting.get("headcount") and room.get("total_room_nights") and fill_placeholders:
-        meeting["headcount"] = 50
+        from apps.negotiation_agent.meeting_space_intent import meeting_space_wanted
+
+        if meeting_space_wanted(rfp):
+            meeting["headcount"] = 50
 
     identified = _source_has_identified_fields(source, room, meeting) or fill_placeholders
     if fill_placeholders:

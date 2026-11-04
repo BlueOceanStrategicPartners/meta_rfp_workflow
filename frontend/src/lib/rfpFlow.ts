@@ -130,6 +130,18 @@ export function cardsHaveIdentifiedFields(cards: Record<string, unknown>): boole
   return false;
 }
 
+/** Room-only stay — hide meeting / catering cards and proposal meeting bindings. */
+export function sessionNeedsMeetingSpace(
+  clientSession?: { intake?: Record<string, string> },
+  cards?: Record<string, unknown>,
+): boolean {
+  const flag = String(clientSession?.intake?.needs_meeting_space ?? "").toLowerCase();
+  if (flag === "0" || flag === "false" || flag === "no") return false;
+  const meeting = (cards?.meeting_space as Record<string, unknown>) || {};
+  if (meeting.included === false) return false;
+  return true;
+}
+
 /** Back-compat alias */
 export function cardsHaveExtraction(cards: Record<string, unknown>): boolean {
   return cardsHaveIdentifiedFields(cards);
