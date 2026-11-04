@@ -19,6 +19,7 @@ import {
   type OccupancyUploadReport,
 } from "../../lib/adminApi";
 import { EMPTY, formatDate, formatDateRange, formatMoney, formatNumber, formatPct } from "../../lib/adminFormat";
+import { sourceMeta } from "../../lib/adminPricing";
 
 const EXPECTED_HEADER =
   "target_date,room_occupancy_pct,adr,revpar,hall_utilization_pct,is_peak_season,local_event_multiplier";
@@ -40,6 +41,24 @@ const COLUMNS: AdminColumn<OccupancyRow>[] = [
     numeric: true,
     render: (r) => (r.local_event_multiplier == null ? EMPTY : `×${formatNumber(r.local_event_multiplier, 2)}`),
   },
+  {
+    key: "source",
+    header: "Source",
+    render: (r) => {
+      const meta = sourceMeta(r.source);
+      if (!meta) return <span className="admin-faint text-xs">{EMPTY}</span>;
+      // Generated rows are muted (whole row) and say in words that they don't train the model.
+      if (!meta.trains) return <span className="admin-faint block max-w-[11rem] text-xs leading-snug">{meta.label}</span>;
+      return <Chip tone={meta.tone}>{meta.label}</Chip>;
+    },
+  },
+];
+
+const SOURCE_TILES: { key: "imported" | "demo" | "manual" | "generated"; label: string; sub: string }[] = [
+  { key: "imported", label: "Imported", sub: "From CSV uploads" },
+  { key: "demo", label: "Demo", sub: "Demo history" },
+  { key: "manual", label: "Manual", sub: "Typed in by an admin" },
+  { key: "generated", label: "App-generated", sub: "Not used for training" },
 ];
 
 const DB_TABLE_LABELS: Record<string, string> = {
@@ -328,6 +347,7 @@ export default function OccupancyPage() {
                 columns={COLUMNS}
                 rows={rowsQ.data}
                 rowKey={(r) => String(r.id ?? r.target_date)}
+                rowClassName={(r) => (sourceMeta(r.source)?.trains === false ? "admin-row-muted" : "")}
                 loading={rowsQ.loading}
                 error={rowsQ.error}
                 onRetry={() => void rowsQ.reload()}
@@ -378,6 +398,20 @@ export default function OccupancyPage() {
               <p className="admin-faint text-xs">
                 Occupancy covers {formatDateRange(db.occupancy_range?.from, db.occupancy_range?.to)}
               </p>
+              {db.by_source ? (
+                <div className="admin-divider space-y-3 pt-3">
+                  <p className="admin-label !mb-0">Occupancy days by source</p>
+                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                    {SOURCE_TILES.map((t) => (
+                      <StatTile key={t.key} label={t.label} value={db.by_source?.[t.key] ?? 0} sub={t.sub} />
+                    ))}
+                  </div>
+                  <p className="admin-faint text-xs">
+                    App-generated days are filler the app creates when a client checks dates. The pricing model never
+                    learns from them.
+                  </p>
+                </div>
+              ) : null}
             </div>
           )}
         </section>

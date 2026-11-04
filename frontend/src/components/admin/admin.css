@@ -18,6 +18,11 @@
   --admin-warning: #fcd34d;
   --admin-mark: rgba(250, 204, 21, 0.28);
   --admin-dialog-bg: #121828;
+  /* Waterfall: a diverging pair (validated for colour-blind separation) + neutral base/totals. */
+  --admin-wf-up: #3987e5;
+  --admin-wf-down: #e66767;
+  --admin-wf-base: #64748b;
+  --admin-wf-total: #94a3b8;
   color-scheme: dark;
   color: var(--admin-fg);
 }
@@ -36,6 +41,10 @@ html[data-theme="light"] .admin-root {
   --admin-warning: #b45309;
   --admin-mark: rgba(250, 204, 21, 0.45);
   --admin-dialog-bg: #ffffff;
+  --admin-wf-up: #2a78d6;
+  --admin-wf-down: #e34948;
+  --admin-wf-base: #94a3b8;
+  --admin-wf-total: #475569;
   color-scheme: light;
 }
 
@@ -245,6 +254,10 @@ html[data-theme="light"] .admin-rail-link.is-active {
 .admin-table tr.is-clickable:focus-visible {
   outline: 2px solid rgba(139, 92, 246, 0.7);
   outline-offset: -2px;
+}
+/* Rows that don't count (e.g. app-generated occupancy). Always paired with a text label. */
+.admin-table tr.admin-row-muted td {
+  color: var(--admin-faint);
 }
 
 /* ---------------- Chips ---------------- */
@@ -473,6 +486,121 @@ html[data-theme="light"] .admin-dialog-host [role="dialog"] button:last-child {
   background: var(--admin-dialog-bg);
   color: var(--admin-fg);
   box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+}
+.admin-modal--wide {
+  max-width: 48rem;
+}
+
+/* ---------------- Price waterfall ("Why this price?") ---------------- */
+
+.admin-wf {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+/* Phone: label + amount on one line, the bar full width underneath. */
+.admin-wf-row,
+.admin-wf-axis {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "label amount"
+    "track track";
+  align-items: center;
+  column-gap: 0.75rem;
+  row-gap: 0.25rem;
+  font-size: 0.8125rem;
+}
+.admin-wf-row.is-total {
+  border-top: 1px solid var(--admin-line);
+  padding-top: 0.5rem;
+  font-weight: 600;
+}
+.admin-wf-label {
+  grid-area: label;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--admin-fg);
+}
+.admin-wf-amount {
+  grid-area: amount;
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  color: var(--admin-fg);
+}
+.admin-wf-track {
+  grid-area: track;
+  position: relative;
+  height: 0.875rem;
+  /* Hairline gridlines at every tick; background-size is set inline from the tick step. */
+  background-image: linear-gradient(to right, var(--admin-line) 1px, transparent 1px);
+  background-repeat: repeat-x;
+  background-position: 0 0;
+}
+.admin-wf-bar {
+  position: absolute;
+  top: 1px;
+  bottom: 1px;
+  min-width: 2px;
+  border-radius: 3px;
+  /* Base price and totals share one neutral. */
+  background: var(--admin-wf-total);
+}
+.admin-wf-bar--up {
+  background: var(--admin-wf-up);
+}
+.admin-wf-bar--down {
+  background: var(--admin-wf-down);
+}
+.admin-wf-bar--flat {
+  background: var(--admin-wf-base);
+}
+.admin-wf-bar--total {
+  background: var(--admin-wf-total);
+}
+.admin-wf-axis {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas: "track";
+  font-size: 11px;
+  color: var(--admin-faint);
+}
+.admin-wf-ticks {
+  grid-area: track;
+  position: relative;
+  height: 1rem;
+}
+.admin-wf-ticks span {
+  position: absolute;
+  top: 0;
+  white-space: nowrap;
+  transform: translateX(-50%);
+  font-variant-numeric: tabular-nums;
+}
+.admin-wf-ticks span:first-child {
+  transform: none;
+}
+.admin-wf-ticks span.is-end {
+  transform: translateX(-100%);
+}
+.admin-wf-swatch {
+  display: inline-block;
+  width: 0.75rem;
+  height: 0.5rem;
+  border-radius: 2px;
+}
+@media (min-width: 640px) {
+  .admin-wf-row,
+  .admin-wf-axis {
+    grid-template-columns: minmax(0, 13rem) minmax(0, 1fr) 6.5rem;
+    grid-template-areas: "label track amount";
+  }
+  .admin-wf-axis {
+    grid-template-areas: ". track .";
+  }
 }
 
 .admin-sr-only {
