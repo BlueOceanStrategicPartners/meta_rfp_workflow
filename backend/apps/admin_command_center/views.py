@@ -10,7 +10,8 @@ from rest_framework.views import APIView
 
 from apps.accounts_rbac.permissions import IsAdminRole
 from apps.dynamic_pricing.models import DynamicPricingQuote, PricingPolicy
-from apps.dynamic_pricing.services import model_status, train_and_save_model
+from apps.dynamic_pricing.services import FALLBACK_REASON_LABELS, default_property, model_status
+from apps.dynamic_pricing.training import train_model
 from apps.inventory.models import HistoricalOccupancy, SpaceInventory, VenueProperty
 from apps.rfp_debate.models import DebateIterationLog, RFPStatus, RFPSubmission
 
@@ -151,19 +152,47 @@ class PricingModelView(AdminAPIView):
 
 class PricingRetrainView(AdminAPIView):
     def post(self, request):
-        prop = VenueProperty.objects.first()
+        prop_id = request.data.get("property") if hasattr(request, "data") else None
+        prop = VenueProperty.objects.filter(pk=prop_id).first() if prop_id else None
+        prop = prop or VenueProperty.objects.order_by("created_at").first()
         if not prop:
             raise AdminInputError("Add a property in Inventory before training the model.")
         try:
-            result = train_and_save_model(prop.id)
+            result = train_model(prop)
         except Exception as exc:  # training libs can fail in many ways; report, don't crash
-            return Response(
-                {"detail": f"Training failed: {exc.__class__.__name__}: {exc}"},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            )
-        state = "skipped_insufficient_data" if result == "skipped_insufficient_data" else "ok"
-        audit.record(request.user, "pricing.retrain", "policy", prop.id, result=state)
-        return Response({"status": state, "trained_at": model_status()["trained_at"]})
+            result = {"status": "error", "detail": f"Training failed: {exc.__class__.__name__}: {exc}"}
+        audit.record(
+            request.user, "pricing.retrain", "policy", prop.id,
+            result=result["status"], version=result.get("version"), metrics=result.get("metrics"),
+        )
+        code = status.HTTP_500_INTERNAL_SERVER_ERROR if result["status"] == "error" else status.HTTP_200_OK
+        return Response(result, status=code)
+
+
+class QuoteExplanationView(AdminAPIView):
+    """Why this price? Every step of the quote, adding up exactly to the stored target and anchor."""
+
+    def get(self, request, pk):
+        quote = get_object_or_404(DynamicPricingQuote.objects.select_related("rfp"), pk=pk)
+        explanation = quote.explanation_json or {}
+        return Response(
+            {
+                "quote_id": str(quote.id),
+                "rfp_id": str(quote.rfp_id),
+                "company_name": rfp_service.company_name(quote.rfp),
+                "created_at": quote.created_at.isoformat(),
+                "engine": quote.engine,
+                "model_version": quote.model_version,
+                "fallback_reason": quote.fallback_reason,
+                "fallback_reason_label": FALLBACK_REASON_LABELS.get(quote.fallback_reason, quote.fallback_reason),
+                "inputs": quote.inputs_json or {},
+                "steps": explanation.get("steps", []),
+                "floor_steps": explanation.get("floor_steps", []),
+                "floor": str(quote.walk_away_floor_price),
+                "target": str(quote.optimal_target_price),
+                "anchor": str(quote.initial_anchor_price),
+            }
+        )
 
 
 class PricingQuotesView(AdminAPIView):
@@ -281,14 +310,23 @@ class SpaceViewSet(AdminViewSetMixin, viewsets.ModelViewSet):
 
 
 class OccupancyListView(AdminAPIView):
+    """Newest days first (what an admin just imported is what they want to check), max 366 rows."""
+
     def get(self, request):
-        qs = HistoricalOccupancy.objects.order_by("target_date")
-        if request.query_params.get("property"):
-            qs = qs.filter(property_id=request.query_params["property"])
-        if request.query_params.get("from"):
-            qs = qs.filter(target_date__gte=request.query_params["from"])
-        if request.query_params.get("to"):
-            qs = qs.filter(target_date__lte=request.query_params["to"])
+        from apps.inventory.models import OccupancySource
+
+        qs = HistoricalOccupancy.objects.order_by("-target_date")
+        params = request.query_params
+        if params.get("property"):
+            qs = qs.filter(property_id=params["property"])
+        if params.get("from"):
+            qs = qs.filter(target_date__gte=params["from"])
+        if params.get("to"):
+            qs = qs.filter(target_date__lte=params["to"])
+        if params.get("source"):
+            if params["source"] not in OccupancySource.values:
+                raise AdminInputError(f"Unknown source {params['source']!r}.")
+            qs = qs.filter(source=params["source"])
         return Response(AdminOccupancySerializer(qs[:366], many=True).data)
 
 
@@ -315,7 +353,10 @@ class OccupancyUploadView(AdminAPIView):
 
 class OccupancySummaryView(AdminAPIView):
     def get(self, request):
+        from apps.dynamic_pricing.training import data_counts
+
         occ = occupancy_range()
+        counts = data_counts(default_property())
         return Response(
             {
                 "engine": settings.DB_ENGINE_MODE,
@@ -327,6 +368,7 @@ class OccupancySummaryView(AdminAPIView):
                     "spaces": SpaceInventory.objects.count(),
                 },
                 "occupancy_range": {"from": occ["from"], "to": occ["to"]},
+                "by_source": {k: counts[k] for k in ("imported", "demo", "manual", "generated")},
             }
         )
 

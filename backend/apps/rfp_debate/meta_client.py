@@ -152,6 +152,11 @@ class MetaModelClient:
         self.api_key = api_key or settings.META_MODEL_API_KEY
         self.base_url = base_url or settings.META_MODEL_API_BASE
 
+    @property
+    def uses_fixtures(self) -> bool:
+        """True when every call returns canned sample answers (USE_FIXTURE_DEBATE or no API key)."""
+        return bool(settings.USE_FIXTURE_DEBATE or not self.api_key)
+
     def complete_json(
         self,
         *,

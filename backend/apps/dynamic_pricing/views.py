@@ -41,16 +41,26 @@ class AdminPricingRetrainView(APIView):
 
 class QuoteDetailView(APIView):
     def get(self, request, rfp_id):
+        from apps.accounts_rbac.models import UserRole
+
+        from .services import client_quote_card
+
         quote = DynamicPricingQuote.objects.filter(rfp_id=rfp_id).order_by("-created_at").first()
         if not quote:
             return Response({"detail": "No quote"}, status=404)
+        if getattr(request.user, "role", None) != UserRole.ADMIN:
+            # Floor and target are internal; clients and designers see the opening offer only.
+            return Response(client_quote_card(quote))
         return Response(
             {
                 "walk_away_floor_price": str(quote.walk_away_floor_price),
                 "optimal_target_price": str(quote.optimal_target_price),
                 "initial_anchor_price": str(quote.initial_anchor_price),
-                "shap": quote.shap_explanations_json,
+                "shap": quote.explanation_json or quote.shap_explanations_json,
                 "used_fallback": quote.used_fallback_engine,
+                "engine": quote.engine,
+                "model_version": quote.model_version,
+                "fallback_reason": quote.fallback_reason,
             }
         )
 

@@ -115,19 +115,18 @@ describe("durations and times", () => {
 });
 
 describe("pricing ladder example", () => {
-  it("matches the plan's worked example (3 nights at 8,500)", () => {
-    const ex = computeLadderExample(DEFAULT_POLICY, 8500, 3, 1);
-    expect(Math.round(ex.floor)).toBe(28560);
-    expect(Math.round(ex.target)).toBe(30090);
+  it("matches the backend formula (3 nights in a hall at 8,500, floor cost 6,000)", () => {
+    const ex = computeLadderExample(DEFAULT_POLICY, 8500, 3, 1, 6000);
+    expect(Math.round(ex.floor)).toBe(20160); // 6,000 × 3 × 1.12
+    expect(Math.round(ex.target)).toBe(30090); // 25,500 × 1.18
     expect(Math.floor(ex.anchor)).toBe(32497);
-    expect(formatMoney(ex.floor)).toBe("28,560");
-    expect(formatMoney(ex.target)).toBe("30,090");
+    expect(formatMoney(ex.floor)).toBe("20,160");
   });
 
-  it("applies seasonality and the event multiplier", () => {
-    const ex = computeLadderExample({ ...DEFAULT_POLICY, event_multiplier: 2 }, 1000, 1, 12);
+  it("applies seasonality and the event multiplier to the price, not the floor", () => {
+    const ex = computeLadderExample({ ...DEFAULT_POLICY, event_multiplier: 2 }, 1000, 1, 12, 500);
     expect(ex.base).toBeCloseTo(1000 * 1.15 * 2);
-    expect(ex.floor).toBeCloseTo(ex.base * 1.12);
+    expect(ex.floor).toBeCloseTo(500 * 1.12);
   });
 
   it("enforces floor < target < anchor even with a bad policy", () => {
@@ -136,6 +135,7 @@ describe("pricing ladder example", () => {
       1000,
       3,
       1,
+      950,
     );
     expect(ex.target).toBeGreaterThanOrEqual(ex.floor * 1.05 - 1e-9);
     expect(ex.anchor).toBeGreaterThanOrEqual(ex.target * 1.03 - 1e-9);

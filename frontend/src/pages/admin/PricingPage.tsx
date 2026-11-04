@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import AdminConfirm from "../../components/admin/AdminConfirm";
 import AdminPanel from "../../components/admin/AdminPanel";
@@ -6,6 +6,8 @@ import AdminTable, { type AdminColumn } from "../../components/admin/AdminTable"
 import { IconRefresh } from "../../components/admin/AdminIcons";
 import { useAdminFeedback } from "../../components/admin/AdminLayout";
 import LoadState from "../../components/admin/LoadState";
+import PricingModelCard from "../../components/admin/PricingModelCard";
+import QuoteExplanationDialog from "../../components/admin/QuoteExplanationDialog";
 import { Chip } from "../../components/admin/StatusChip";
 import { usePolling } from "../../hooks/usePolling";
 import {
@@ -34,6 +36,7 @@ import {
   type PolicyErrors,
   type PolicyNumbers,
 } from "../../lib/adminFormat";
+import { engineLabel, fallbackReasonText, retrainFeedback, usedModel } from "../../lib/adminPricing";
 
 /* ---------------- Form model ---------------- */
 
@@ -192,9 +195,11 @@ function PolicyEditor({
   );
 }
 
-function LadderExampleLine({ policy, rackRate }: { policy: PolicyNumbers; rackRate: number }) {
+type ExampleSpace = { name: string; rackRate: number; floorCost: number };
+
+function LadderExampleLine({ policy, space }: { policy: PolicyNumbers; space: ExampleSpace }) {
   const [month, setMonth] = useState(() => new Date().getMonth() + 1);
-  const ex = computeLadderExample(policy, rackRate, 3, month);
+  const ex = computeLadderExample(policy, space.rackRate, 3, month, space.floorCost);
   return (
     <div className="admin-card px-4 py-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -215,11 +220,12 @@ function LadderExampleLine({ policy, rackRate }: { policy: PolicyNumbers; rackRa
         </label>
       </div>
       <p className="admin-fg admin-num mt-2 text-sm">
-        3 nights at {formatMoney(rackRate)} → floor <strong>{formatMoney(ex.floor)}</strong> · target{" "}
-        <strong>{formatMoney(ex.target)}</strong> · anchor <strong>{formatMoney(ex.anchor)}</strong>
+        {space.name} for 3 nights at {formatMoney(space.rackRate)} → floor <strong>{formatMoney(ex.floor)}</strong> ·
+        target <strong>{formatMoney(ex.target)}</strong> · anchor <strong>{formatMoney(ex.anchor)}</strong>
       </p>
       <p className="admin-faint mt-1 text-[11px]">
-        Uses your highest rack rate. Before any space floor cost is applied.
+        Space only, using the simple formula. Real quotes add guest rooms, and a trained model replaces the month
+        multiplier. Open a quote below to see exactly how it was priced.
       </p>
     </div>
   );
@@ -232,7 +238,13 @@ const QUOTE_COLUMNS: AdminColumn<QuoteWithRfp>[] = [
     key: "rfp",
     header: "Request",
     render: (q) => (
-      <Link to={`/admin/debates/${encodeURIComponent(q.rfp_id)}`} className="admin-link admin-code !no-underline">
+      // The row opens "Why this price?"; the link must not trigger it (click or Enter).
+      <Link
+        to={`/admin/debates/${encodeURIComponent(q.rfp_id)}`}
+        className="admin-link admin-code !no-underline"
+        onClick={(e) => e.stopPropagation()}
+        onKeyDown={(e) => e.stopPropagation()}
+      >
         {shortId(q.rfp_id)}
       </Link>
     ),
@@ -248,8 +260,17 @@ const QUOTE_COLUMNS: AdminColumn<QuoteWithRfp>[] = [
   { key: "agreed", header: "Agreed", numeric: true, render: (q) => formatMoney(q.agreed) },
   {
     key: "engine",
-    header: "Engine",
-    render: (q) => <Chip tone={q.used_fallback ? "slate" : "violet"}>{q.used_fallback ? "Fallback" : "XGBoost"}</Chip>,
+    header: "Priced by",
+    render: (q) => {
+      const model = usedModel(q);
+      const reason = model ? null : fallbackReasonText(q.fallback_reason, q.fallback_reason_label);
+      return (
+        <span className="flex min-w-[7.5rem] flex-col items-start gap-0.5">
+          <Chip tone={model ? "violet" : "slate"}>{engineLabel(q)}</Chip>
+          {reason ? <span className="admin-faint max-w-[12rem] text-[11px] leading-snug">{reason}</span> : null}
+        </span>
+      );
+    },
   },
   {
     key: "created",
@@ -276,6 +297,8 @@ export default function PricingPage() {
   const [saving, setSaving] = useState(false);
   const [retrainOpen, setRetrainOpen] = useState(false);
   const [retraining, setRetraining] = useState(false);
+  const [explainQuote, setExplainQuote] = useState<QuoteWithRfp | null>(null);
+  const closeExplain = useCallback(() => setExplainQuote(null), []);
 
   const initialForm = useMemo(() => (policyQ.data ? formFromPolicy(policyQ.data) : null), [policyQ.data]);
   useEffect(() => {
@@ -288,9 +311,13 @@ export default function PricingPage() {
   const dirty = !!form && !!initialForm && JSON.stringify(form) !== JSON.stringify(initialForm);
   const valid = Object.keys(clientErrors).length === 0;
 
-  const rackRate = useMemo(() => {
-    const rates = (spacesQ.data ?? []).map((s) => Number(s.rack_rate)).filter((r) => Number.isFinite(r) && r > 0);
-    return rates.length ? Math.max(...rates) : null;
+  // Example uses the priciest meeting space (rack rate and its floor cost), like the backend's package.
+  const exampleSpace = useMemo<ExampleSpace | null>(() => {
+    const spaces = (spacesQ.data ?? [])
+      .filter((s) => s.space_type !== "ROOM_BLOCK" && Number(s.rack_rate) > 0)
+      .sort((a, b) => Number(b.rack_rate) - Number(a.rack_rate));
+    const top = spaces[0];
+    return top ? { name: top.name, rackRate: Number(top.rack_rate), floorCost: Number(top.base_floor_cost) || 0 } : null;
   }, [spacesQ.data]);
 
   const save = async () => {
@@ -321,24 +348,17 @@ export default function PricingPage() {
     try {
       const res = await retrainPricingModel();
       setRetrainOpen(false);
-      if (res.status === "ok") {
-        notify("Pricing model retrained.", "success");
-      } else if (res.status === "skipped_insufficient_data") {
-        notify("Not enough data to retrain. Import at least 5 days of occupancy.", "warning");
-      } else {
-        notify(`Retrain finished with status: ${res.status}.`, "info");
-      }
+      const { message, tone } = retrainFeedback(res);
+      notify(message, tone);
       await modelQ.reload();
     } catch (err) {
       setRetrainOpen(false);
-      notify(errorMessage(err, "Retraining failed. Quotes keep using the fallback engine."), "error");
+      notify(errorMessage(err, "Retraining failed. Quotes keep using the simple formula."), "error");
+      await modelQ.reload();
     } finally {
       setRetraining(false);
     }
   };
-
-  const model = modelQ.data;
-  const enoughRows = model ? model.occupancy_rows >= model.min_rows_required : false;
 
   return (
     <AdminPanel
@@ -396,13 +416,14 @@ export default function PricingPage() {
       <AdminConfirm
         open={retrainOpen}
         title="Retrain the pricing model?"
-        message="It learns from the occupancy data you've imported. New quotes use the updated model straight away."
+        message="It learns from the real occupancy history you've imported (never app-generated days). If the new model beats a simple average, new quotes use it straight away."
         confirmLabel="Retrain model"
         busyLabel="Retraining…"
         busy={retraining}
         onConfirm={() => void retrain()}
         onCancel={() => setRetrainOpen(false)}
       />
+      <QuoteExplanationDialog quote={explainQuote} onClose={closeExplain} />
       <div className="space-y-5">
         <section className="admin-card p-4" aria-labelledby="pr-policy">
           <h3 id="pr-policy" className="admin-section-title mb-3">
@@ -428,84 +449,39 @@ export default function PricingPage() {
               />
               {!valid ? (
                 <p className="admin-alert admin-alert--warning">Fix the highlighted values to see an example quote.</p>
-              ) : rackRate === null ? (
+              ) : exampleSpace === null ? (
                 <p className="admin-muted text-xs">Add a space in Inventory to see an example quote with your real prices.</p>
               ) : (
-                <LadderExampleLine policy={numbers} rackRate={rackRate} />
+                <LadderExampleLine policy={numbers} space={exampleSpace} />
               )}
             </div>
           )}
         </section>
 
-        <section className="admin-card p-4" aria-labelledby="pr-model">
-          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-            <h3 id="pr-model" className="admin-section-title">
-              Pricing model
-            </h3>
-            <button
-              type="button"
-              className="studio-btn-secondary"
-              disabled={!model || retraining}
-              onClick={() => setRetrainOpen(true)}
-            >
-              Retrain model
-            </button>
-          </div>
-          {!model ? (
-            <LoadState
-              loading={modelQ.loading}
-              error={modelQ.error}
-              onRetry={() => void modelQ.reload()}
-              errorTitle="We couldn't load the model status."
-              compact
-            />
-          ) : (
-            <dl className="grid gap-3 sm:grid-cols-3">
-              <div>
-                <dt className="admin-label">Trained</dt>
-                <dd>
-                  {model.artifact_exists ? (
-                    <Chip tone="green">Yes</Chip>
-                  ) : (
-                    <Chip tone="slate">Not yet, using fallback</Chip>
-                  )}
-                </dd>
-              </div>
-              <div>
-                <dt className="admin-label">Trained at</dt>
-                <dd className="admin-fg text-sm">{model.trained_at ? formatDateTime(model.trained_at) : "Never"}</dd>
-              </div>
-              <div>
-                <dt className="admin-label">Occupancy days available</dt>
-                <dd className="admin-fg admin-num text-sm">
-                  {model.occupancy_rows}{" "}
-                  <span className={enoughRows ? "admin-success-text" : "admin-warning-text"}>
-                    {enoughRows ? "Enough to train" : `Need at least ${model.min_rows_required}`}
-                  </span>
-                </dd>
-              </div>
-            </dl>
-          )}
-          {model && !enoughRows ? (
-            <p className="admin-muted mt-3 text-xs">
-              Import more days on the{" "}
-              <Link to="/admin/occupancy" className="admin-link">
-                Occupancy page
-              </Link>{" "}
-              before retraining.
-            </p>
-          ) : null}
-        </section>
+        <PricingModelCard
+          model={modelQ.data}
+          loading={modelQ.loading}
+          error={modelQ.error}
+          onRetry={() => void modelQ.reload()}
+          onRetrain={() => setRetrainOpen(true)}
+          retraining={retraining}
+        />
 
         <section className="admin-card min-w-0 p-4" aria-labelledby="pr-quotes">
-          <h3 id="pr-quotes" className="admin-section-title mb-3">
-            Recent quotes
-          </h3>
+          <div className="mb-3">
+            <h3 id="pr-quotes" className="admin-section-title">
+              Recent quotes
+            </h3>
+            <p className="admin-faint mt-0.5 text-xs">Select a quote to see why it got that price.</p>
+          </div>
           <AdminTable
-            caption="Recent quotes"
+            caption="Recent quotes. Select a row to see why it got that price."
             columns={QUOTE_COLUMNS}
             rows={quotesQ.data}
             rowKey={(q) => q.id}
+            onRowClick={(q) => setExplainQuote(q)}
+            rowLabel={(q) => `Why this price? ${q.company_name || "Unnamed"}`}
+            selectedKey={explainQuote?.id ?? null}
             loading={quotesQ.loading}
             error={quotesQ.error}
             onRetry={() => void quotesQ.reload()}

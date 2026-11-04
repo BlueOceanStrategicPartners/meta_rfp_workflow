@@ -230,14 +230,20 @@ export type LadderExample = {
  *   anchor = target × (1 + anchor_markup)
  * then the ladder is enforced: target ≥ floor × 1.05, anchor ≥ target × 1.03.
  */
+/**
+ * Same formula as the backend's simple-formula quote for a space-only booking:
+ * floor = operating cost (space floor cost × nights) + margin;
+ * target = rack rate × nights × season × event multiplier + goal markup.
+ */
 export function computeLadderExample(
   policy: PolicyNumbers,
   rackRate: number,
   nights = 3,
   month = 1,
+  floorCost = 0,
 ): LadderExample {
   const base = rackRate * nights * seasonFor(policy.seasonality_json, month) * policy.event_multiplier;
-  const floor = base * (1 + policy.walk_away_floor_margin_pct);
+  const floor = floorCost * nights * (1 + policy.walk_away_floor_margin_pct);
   let target = base * (1 + policy.target_markup_pct);
   let anchor = target * (1 + policy.anchor_markup_pct);
   if (target < floor * 1.05) target = floor * 1.05;

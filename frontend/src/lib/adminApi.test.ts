@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { AdminApiError, AdminAuthError, getOverview, listRfps } from "./adminApi";
+import { AdminApiError, AdminAuthError, getOverview, getQuoteExplanation, listRfps } from "./adminApi";
 
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -50,5 +50,13 @@ describe("adminApi", () => {
     vi.stubGlobal("fetch", fetchMock);
     await listRfps({ status: "NEGOTIATING", q: "" });
     expect(fetchMock.mock.calls[0][0]).toBe("/api/admin-center/rfps/?status=NEGOTIATING");
+  });
+
+  it("fetches a quote explanation from its own route", async () => {
+    const fetchMock = vi.fn(async (_url: string) => jsonResponse(200, { quote_id: "q-1", steps: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+    const exp = await getQuoteExplanation("q-1");
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/admin-center/pricing/quotes/q-1/explanation/");
+    expect(exp.quote_id).toBe("q-1");
   });
 });

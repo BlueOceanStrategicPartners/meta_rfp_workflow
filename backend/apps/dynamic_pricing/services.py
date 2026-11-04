@@ -1,210 +1,240 @@
+"""Dynamic pricing: one package, two demand engines (XGBoost or rule fallback), an exact explanation.
+
+price steps (each an exact cent amount; running totals equal the stored prices):
+  base → demand (model factors or seasonality) → [demand limit] → goal markup → [floor guard] = target
+  target → opening-offer markup → [anchor guard] = anchor
+floor = operating cost × (1 + floor margin)
+"""
 from __future__ import annotations
 
-import json
 import math
-from datetime import date, datetime
+from datetime import date
 from decimal import Decimal
-from pathlib import Path
-
-from django.conf import settings
-from django.db import models
 
 from apps.core.exceptions import PricingBoundsViolationError
-from apps.inventory.models import HistoricalOccupancy, SpaceInventory, VenueProperty
+from apps.inventory.models import VenueProperty
 from apps.rfp_debate.models import RFPSubmission
 
+from . import model_store
+from .explain import predict_with_contributions
+from .features import feature_rows, history_for_dates, week_stats
 from .models import DynamicPricingQuote, PricingPolicy
-from .rule_fallback import RuleBasedPricingFallbackEngine, enforce_ladder
+from .package import PackageBase, QuoteNotPossibleError, build_package, money
+from .rule_fallback import RuleBasedPricingFallbackEngine
+from .training import MIN_TRAINING_ROWS, data_counts, train_model
 
-MODEL_PATH = Path(settings.BASE_DIR) / "artifacts" / "xgboost_pricing.json"
-MODEL_META_PATH = MODEL_PATH.with_suffix(".meta.json")
-MIN_TRAINING_ROWS = 5
 # The model predicts a demand index around 1.0; clamp it so one bad prediction cannot run away.
 DEMAND_INDEX_MIN = 0.8
 DEMAND_INDEX_MAX = 1.5
-FEATURE_COLUMNS = [
-    "days_until_event",
-    "event_duration_days",
-    "avg_historical_occupancy",
-    "avg_adr",
-    "requested_rooms_ratio",
-    "meeting_headcount",
-    "month",
+# Raw predictions outside this band are treated as broken (spec §9: PricingBoundsViolationError).
+RAW_PREDICTION_BOUNDS = (0.5, 2.0)
+MAX_STAY_NIGHTS = 30
+MAX_DAYS_AHEAD = 730
+FLOOR_GUARD = Decimal("1.05")  # target is at least 5% above the walk-away floor
+ANCHOR_GUARD = Decimal("1.03")  # anchor is at least 3% above the target
+
+FALLBACK_REASON_LABELS = {
+    "": "",
+    "no_model": "No trained model yet",
+    "insufficient_history": "Not enough history to train",
+    "model_not_better_than_baseline": "Model not better than a simple average",
+    "prediction_out_of_bounds": "Model gave an unusual answer",
+    "extreme_request": "Unusual request (very long or far ahead)",
+    "model_error": "Model could not be used",
+    "dates_missing": "Dates not confirmed yet",
+}
+
+__all__ = [
+    "QuoteNotPossibleError",
+    "compute_dynamic_quote",
+    "client_quote_card",
+    "autonomous_limit",
+    "default_property",
+    "model_status",
+    "train_and_save_model",
+    "FALLBACK_REASON_LABELS",
 ]
 
 
-def _parse_date(value) -> date | None:
-    if not value:
-        return None
-    if isinstance(value, date):
-        return value
+def default_property() -> VenueProperty:
+    prop = VenueProperty.objects.order_by("created_at").first()
+    return prop or VenueProperty.objects.create(name="Default Property")
+
+
+class _Waterfall:
+    """Collects price steps; every amount is rounded first so the running total is exact."""
+
+    def __init__(self, base: Decimal):
+        self.total = money(base)
+        self.steps = [self._step("base", "Base price (rooms + meeting space)", "base", self.total)]
+
+    def _step(self, key, label, kind, amount, ends=None):
+        return {"key": key, "label": label, "kind": kind, "amount": str(amount), "running_total": str(self.total), "ends": ends}
+
+    def add(self, key: str, label: str, kind: str, amount) -> None:
+        amount = money(amount)
+        if amount == 0:
+            return
+        self.total = money(self.total + amount)
+        self.steps.append(self._step(key, label, kind, amount))
+
+    def end(self, ends: str) -> None:
+        self.steps[-1]["ends"] = ends
+
+
+def _pct(value) -> str:
+    pct = float(value) * 100
+    return f"{pct:+.1f}%" if 0 < abs(pct) < 1 else f"{pct:+.0f}%"  # never show "-0%" next to a real amount
+
+
+def _model_demand(prop: VenueProperty, pkg: PackageBase) -> tuple[dict | None, str, int | None]:
+    """Returns (prediction, fallback_reason, model_version)."""
+    if pkg.dates_assumed:
+        return None, "dates_missing", None
+    if pkg.nights > MAX_STAY_NIGHTS or (pkg.check_in - date.today()).days > MAX_DAYS_AHEAD:
+        return None, "extreme_request", None
     try:
-        return datetime.strptime(str(value), "%Y-%m-%d").date()
-    except ValueError:
-        return None
-
-
-def build_feature_vector(rfp: RFPSubmission, property_id) -> dict:
-    cards = rfp.active_ui_cards_json or {}
-    overview = cards.get("event_overview", {})
-    meeting = cards.get("meeting_space", {})
-    room_block = cards.get("room_block", {})
-    check_in = _parse_date(overview.get("check_in_date"))
-    days_until = (check_in - date.today()).days if check_in else 30
-    duration = 1
-    co = _parse_date(overview.get("check_out_date"))
-    if check_in and co:
-        duration = max((co - check_in).days, 1)
-    hist_qs = HistoricalOccupancy.objects.filter(property_id=property_id)
-    if check_in:
-        hist_qs = hist_qs.filter(target_date__month=check_in.month)
-    agg = hist_qs.aggregate(avg_occ=models.Avg("room_occupancy_pct"), avg_adr=models.Avg("adr"))
-    avg_occ = float(agg["avg_occ"] or 0.65)
-    avg_adr = float(agg["avg_adr"] or 200)
-    total_rooms = sum(
-        b.get("single", 0) + b.get("double", 0) + b.get("deluxe", 0) + b.get("suite", 0)
-        for b in room_block.get("blocks", [])
-    )
-    spaces = SpaceInventory.objects.filter(property_id=property_id)
-    total_available = spaces.filter(space_type="ROOM_BLOCK").count() or 100
-    headcount = float(meeting.get("headcount") or 0)
-    return {
-        "days_until_event": days_until,
-        "event_duration_days": duration,
-        "avg_historical_occupancy": avg_occ,
-        "avg_adr": avg_adr,
-        "requested_rooms_ratio": total_rooms / max(total_available, 1),
-        "meeting_headcount": headcount,
-        "month": check_in.month if check_in else date.today().month,
-    }
-
-
-def _predict_with_xgboost(features: dict) -> tuple[float, dict]:
+        active = model_store.active_model(prop.id)
+    except Exception as exc:  # unreadable model file: keep pricing on the simple formula, show the error
+        model_store.record_error(prop.id, f"{exc.__class__.__name__}: {exc}")
+        meta = model_store.read_meta(prop.id) or {}
+        return None, "model_error", meta.get("version")
+    if active is None:
+        meta = model_store.read_meta(prop.id)
+        if meta and meta.get("inactive_reason"):
+            return None, meta["inactive_reason"], None
+        trainable = data_counts(prop)["trainable"]
+        return None, ("insufficient_history" if trainable < MIN_TRAINING_ROWS else "no_model"), None
+    booster, meta = active
     try:
-        import xgboost as xgb
-    except ImportError as exc:
-        raise PricingBoundsViolationError("XGBoost not available") from exc
-
-    if not MODEL_PATH.exists():
-        raise PricingBoundsViolationError("Model artifact missing")
-
-    try:
-        import numpy as np
-
-        booster = xgb.Booster()
-        booster.load_model(str(MODEL_PATH))
-        row = np.array([[float(features[name]) for name in FEATURE_COLUMNS]])
-        dmatrix = xgb.DMatrix(row, feature_names=FEATURE_COLUMNS)
-        score = float(booster.predict(dmatrix)[0])
-    except Exception as exc:  # corrupt artifact / feature mismatch -> rule-based fallback
-        raise PricingBoundsViolationError(f"Model prediction failed: {exc}") from exc
-    if math.isnan(score) or score <= 0:
-        raise PricingBoundsViolationError("Invalid model output")
-    score = min(max(score, DEMAND_INDEX_MIN), DEMAND_INDEX_MAX)
-    shap = {
-        "top_features": [
-            {"name": "avg_historical_occupancy", "impact": features["avg_historical_occupancy"]},
-            {"name": "requested_rooms_ratio", "impact": features["requested_rooms_ratio"]},
-        ]
-    }
-    return score, shap
+        frame = history_for_dates(prop, pkg.stay_dates)
+        stats = week_stats(frame, float(meta.get("mean_revpar") or 0) or 1.0)
+        prediction = predict_with_contributions(booster, feature_rows(pkg.stay_dates, stats))
+        raw = prediction["prediction"]
+        if math.isnan(raw) or not RAW_PREDICTION_BOUNDS[0] <= raw <= RAW_PREDICTION_BOUNDS[1]:
+            raise PricingBoundsViolationError(f"Demand prediction {raw:.3f} outside {RAW_PREDICTION_BOUNDS}")
+    except PricingBoundsViolationError:
+        return None, "prediction_out_of_bounds", meta.get("version")
+    except Exception as exc:  # corrupt artifact, feature mismatch: report on the model card, keep pricing
+        model_store.record_error(prop.id, f"{exc.__class__.__name__}: {exc}")
+        return None, "model_error", meta.get("version")
+    return prediction, "", meta.get("version")
 
 
 def compute_dynamic_quote(rfp: RFPSubmission) -> DynamicPricingQuote:
-    prop = VenueProperty.objects.first()
-    if not prop:
-        prop = VenueProperty.objects.create(name="Default Property")
-    features = build_feature_vector(rfp, prop.id)
+    """Price the RFP's current cards. Raises QuoteNotPossibleError when it cannot be priced honestly."""
+    prop = default_property()
     policy = PricingPolicy.get_solo()
-    used_fallback = False
-    try:
-        if HistoricalOccupancy.objects.filter(property=prop).count() == 0:
-            raise PricingBoundsViolationError("No historical rows")
-        demand_score, shap_json = _predict_with_xgboost(features)
-    except PricingBoundsViolationError:
-        used_fallback = True
-        demand_score, prices = RuleBasedPricingFallbackEngine.quote(prop, features, policy)
-        shap_json = {"fallback": True, "demand_score": demand_score}
-        floor = prices["floor"]
-        target = prices["target"]
-        anchor = prices["anchor"]
-    else:
-        base = (
-            Decimal(str(features["avg_adr"]))
-            * Decimal(str(features["event_duration_days"]))
-            * Decimal(str(policy.season(features.get("month"))))
-            * Decimal(str(policy.event_multiplier))
-        )
-        multiplier = Decimal(str(demand_score))
-        floor = base * (Decimal("1") + Decimal(str(policy.walk_away_floor_margin_pct)))
-        target = base * multiplier * (Decimal("1") + Decimal(str(policy.target_markup_pct)))
-        anchor = target * (Decimal("1") + Decimal(str(policy.anchor_markup_pct)))
-        space_floor = (
-            SpaceInventory.objects.filter(property=prop).order_by("base_floor_cost").first()
-        )
-        if space_floor and floor < space_floor.base_floor_cost:
-            floor = space_floor.base_floor_cost
-        floor, target, anchor = enforce_ladder(floor, target, anchor)
+    pkg = build_package(rfp.active_ui_cards_json or {}, prop, policy)
+    base = pkg.base_price
+    waterfall = _Waterfall(base)
 
-    quote = DynamicPricingQuote.objects.create(
+    prediction, reason, version = _model_demand(prop, pkg)
+    if prediction is not None:
+        engine = "model"
+        bias, raw = prediction["bias"], prediction["prediction"]
+        waterfall.add("demand_normal", "Normal demand for these dates", "demand", base * Decimal(str(bias - 1)))
+        for label, value in sorted(prediction["contributions"].items(), key=lambda kv: -abs(kv[1])):
+            waterfall.add(f"demand:{label}", f"{label} ({_pct(value)})", "demand", base * Decimal(str(value)))
+        demand = min(max(raw, DEMAND_INDEX_MIN), DEMAND_INDEX_MAX)
+        if demand != raw:
+            waterfall.add("demand_limit", f"Demand limit ({DEMAND_INDEX_MIN}–{DEMAND_INDEX_MAX}×)", "clamp", base * Decimal(str(demand - raw)))
+        # Snap the running total to base × demand so rounding of many small factors cannot drift.
+        waterfall.add("demand_rounding", "Rounding", "demand", money(base * Decimal(str(demand))) - waterfall.total)
+    else:
+        engine = "fallback"
+        month = (pkg.check_in or date.today()).month
+        demand = RuleBasedPricingFallbackEngine.multiplier(policy, month)
+        waterfall.add("season", f"Season and event multiplier ({_pct(demand - 1)}, simple formula)", "demand", base * Decimal(str(demand - 1)))
+
+    waterfall.add("goal_markup", f"Goal markup ({_pct(policy.target_markup_pct)})", "markup", waterfall.total * Decimal(str(policy.target_markup_pct)))
+    floor = money(pkg.operating_cost * (Decimal("1") + Decimal(str(policy.walk_away_floor_margin_pct))))
+    min_target = money(floor * FLOOR_GUARD)
+    if waterfall.total < min_target:
+        waterfall.add("floor_guard", "Raised to stay above the walk-away price", "guard", min_target - waterfall.total)
+    waterfall.end("target")
+    target = waterfall.total
+
+    waterfall.add("anchor_markup", f"Opening-offer markup ({_pct(policy.anchor_markup_pct)})", "markup", target * Decimal(str(policy.anchor_markup_pct)))
+    min_anchor = money(target * ANCHOR_GUARD)
+    if waterfall.total < min_anchor:
+        waterfall.add("anchor_guard", "Raised to leave room to negotiate", "guard", min_anchor - waterfall.total)
+    waterfall.end("anchor")
+    anchor = waterfall.total
+
+    floor_steps = [
+        {"key": "operating_cost", "label": "Operating cost (rooms + space)", "amount": str(pkg.operating_cost), "running_total": str(pkg.operating_cost)},
+        {"key": "floor_margin", "label": f"Minimum margin ({_pct(policy.walk_away_floor_margin_pct)})", "amount": str(floor - pkg.operating_cost), "running_total": str(floor)},
+    ]
+    explanation = {"steps": waterfall.steps, "floor_steps": floor_steps}
+    return DynamicPricingQuote.objects.create(
         rfp=rfp,
-        xgboost_demand_score=float(demand_score),
+        xgboost_demand_score=float(demand),
         walk_away_floor_price=floor,
         optimal_target_price=target,
         initial_anchor_price=anchor,
-        shap_explanations_json=shap_json,
-        used_fallback_engine=used_fallback,
+        shap_explanations_json=explanation,
+        explanation_json=explanation,
+        inputs_json=pkg.as_inputs(),
+        used_fallback_engine=engine == "fallback",
+        engine=engine,
+        model_version=version,
+        fallback_reason=reason,
     )
-    return quote
+
+
+def client_quote_card(quote: DynamicPricingQuote) -> dict:
+    """What the client may see: the opening offer and a friendly breakdown. Never floor or target."""
+    inputs = quote.inputs_json or {}
+    return {
+        "anchor_price": float(quote.initial_anchor_price),
+        "estimate": bool(inputs.get("dates_assumed")),
+        "breakdown": {
+            "rooms": inputs.get("rooms_part"),
+            "room_nights": inputs.get("room_nights"),
+            "space": inputs.get("space_part"),
+            "space_name": inputs.get("space_name"),
+            "nights": inputs.get("nights"),
+        },
+    }
+
+
+def autonomous_limit(quote: DynamicPricingQuote, policy: PricingPolicy | None = None) -> Decimal:
+    """Lowest price the agent may agree on its own (spec §6.2 max autonomous discount).
+
+    Below this (but above the floor) a person must approve; below the floor is always refused.
+    """
+    policy = policy or PricingPolicy.get_solo()
+    discounted = money(quote.initial_anchor_price * (Decimal("1") - Decimal(str(policy.max_autonomous_discount_pct))))
+    return max(quote.walk_away_floor_price, discounted)
 
 
 def train_and_save_model(property_id) -> str:
-    """Train a minimal XGBoost regressor from HistoricalOccupancy and persist artifact."""
-    import pandas as pd
-    import xgboost as xgb
-
-    rows = HistoricalOccupancy.objects.filter(property_id=property_id)
-    if rows.count() < MIN_TRAINING_ROWS:
+    """Backward-compatible wrapper: returns the model path, or the skip status."""
+    prop = VenueProperty.objects.get(pk=property_id)
+    result = train_model(prop)
+    if result["status"] == "skipped_insufficient_data":
         return "skipped_insufficient_data"
-    mean_revpar = float(rows.aggregate(m=models.Avg("revpar"))["m"] or 0) or 1.0
-    records = []
-    for row in rows:
-        records.append(
-            {
-                "days_until_event": 30,
-                "event_duration_days": 3,
-                "avg_historical_occupancy": row.room_occupancy_pct,
-                "avg_adr": float(row.adr),
-                "requested_rooms_ratio": 0.5,
-                "meeting_headcount": 200,
-                "month": row.target_date.month,
-                # Demand index (~1.0): RevPAR relative to the property average, not raw currency.
-                "label": float(row.revpar) / mean_revpar,
-            }
-        )
-    df = pd.DataFrame(records)
-    feature_cols = FEATURE_COLUMNS
-    dtrain = xgb.DMatrix(df[feature_cols], label=df["label"])
-    model = xgb.train({"objective": "reg:squarederror"}, dtrain, num_boost_round=10)
-    MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
-    model.save_model(str(MODEL_PATH))
-    MODEL_META_PATH.write_text(
-        json.dumps({"trained_at": datetime.now().astimezone().isoformat(), "rows": len(records)}),
-        encoding="utf-8",
-    )
-    return str(MODEL_PATH)
+    return str(model_store.model_path(prop.id))
 
 
-def model_status() -> dict:
-    trained_at = None
-    if MODEL_META_PATH.exists():
-        try:
-            trained_at = json.loads(MODEL_META_PATH.read_text(encoding="utf-8")).get("trained_at")
-        except (OSError, ValueError):
-            trained_at = None
+def model_status(prop: VenueProperty | None = None) -> dict:
+    prop = prop or default_property()
+    meta = model_store.read_meta(prop.id) or {}
+    counts = data_counts(prop)
     return {
-        "artifact_exists": MODEL_PATH.exists(),
-        "trained_at": trained_at,
-        "occupancy_rows": HistoricalOccupancy.objects.count(),
+        "artifact_exists": model_store.model_path(prop.id).exists(),
+        "trained_at": meta.get("trained_at"),
+        "occupancy_rows": counts["trainable"],
         "min_rows_required": MIN_TRAINING_ROWS,
+        "version": meta.get("version"),
+        "is_active": bool(meta.get("is_active")),
+        "inactive_reason": meta.get("inactive_reason") or "",
+        "rows_used": meta.get("rows_used"),
+        "date_from": meta.get("date_from"),
+        "date_to": meta.get("date_to"),
+        "metrics": meta.get("metrics"),
+        "feature_importance": meta.get("feature_importance") or [],
+        "data": counts,
+        "last_error": meta.get("last_error") or "",
     }

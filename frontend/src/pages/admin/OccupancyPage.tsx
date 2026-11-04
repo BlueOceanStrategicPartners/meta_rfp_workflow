@@ -19,6 +19,7 @@ import {
   type OccupancyUploadReport,
 } from "../../lib/adminApi";
 import { EMPTY, formatDate, formatDateRange, formatMoney, formatNumber, formatPct } from "../../lib/adminFormat";
+import { sourceMeta } from "../../lib/adminPricing";
 
 const EXPECTED_HEADER =
   "target_date,room_occupancy_pct,adr,revpar,hall_utilization_pct,is_peak_season,local_event_multiplier";
@@ -40,6 +41,24 @@ const COLUMNS: AdminColumn<OccupancyRow>[] = [
     numeric: true,
     render: (r) => (r.local_event_multiplier == null ? EMPTY : `×${formatNumber(r.local_event_multiplier, 2)}`),
   },
+  {
+    key: "source",
+    header: "Source",
+    render: (r) => {
+      const meta = sourceMeta(r.source);
+      if (!meta) return <span className="admin-faint text-xs">{EMPTY}</span>;
+      // Generated rows are muted (whole row) and say in words that they don't train the model.
+      if (!meta.trains) return <span className="admin-faint block max-w-[11rem] text-xs leading-snug">{meta.label}</span>;
+      return <Chip tone={meta.tone}>{meta.label}</Chip>;
+    },
+  },
+];
+
+const SOURCE_TILES: { key: "imported" | "demo" | "manual" | "generated"; label: string; sub: string }[] = [
+  { key: "imported", label: "Imported", sub: "From CSV uploads" },
+  { key: "demo", label: "Demo", sub: "Demo history" },
+  { key: "manual", label: "Manual", sub: "Typed in by an admin" },
+  { key: "generated", label: "App-generated", sub: "Not used for training" },
 ];
 
 const DB_TABLE_LABELS: Record<string, string> = {
@@ -92,15 +111,21 @@ export default function OccupancyPage() {
   const [propertyId, setPropertyId] = useAdminProperty(propsQ.data);
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
+  const [source, setSource] = useState("");
   const rangeInvalid = !!from && !!to && to < from;
 
   const rowsQ = usePolling(
     () =>
       propertyId
-        ? listOccupancy({ property: propertyId, from: from || undefined, to: rangeInvalid ? undefined : to || undefined })
+        ? listOccupancy({
+            property: propertyId,
+            from: from || undefined,
+            to: rangeInvalid ? undefined : to || undefined,
+            source: source || undefined,
+          })
         : Promise.resolve([] as OccupancyRow[]),
     0,
-    [propertyId, from, to, rangeInvalid],
+    [propertyId, from, to, rangeInvalid, source],
   );
   const dbQ = usePolling(getDbSummary, 0);
 
@@ -299,6 +324,21 @@ export default function OccupancyPage() {
                 </h3>
                 <div className="flex flex-wrap items-end gap-2">
                   <label className="block">
+                    <span className="admin-label">Source</span>
+                    <select
+                      id="oc-source"
+                      className="studio-field !w-auto !py-2"
+                      value={source}
+                      onChange={(e) => setSource(e.target.value)}
+                    >
+                      <option value="">All sources</option>
+                      <option value="imported">Imported</option>
+                      <option value="demo">Demo</option>
+                      <option value="manual">Manual</option>
+                      <option value="generated">App-generated (not used for training)</option>
+                    </select>
+                  </label>
+                  <label className="block">
                     <span className="admin-label">From</span>
                     <input type="date" className="studio-field !py-2" value={from} onChange={(e) => setFrom(e.target.value)} />
                   </label>
@@ -306,16 +346,17 @@ export default function OccupancyPage() {
                     <span className="admin-label">To</span>
                     <input type="date" className="studio-field !py-2" value={to} onChange={(e) => setTo(e.target.value)} />
                   </label>
-                  {from || to ? (
+                  {from || to || source ? (
                     <button
                       type="button"
                       className="studio-btn-secondary admin-btn-small"
                       onClick={() => {
                         setFrom("");
                         setTo("");
+                        setSource("");
                       }}
                     >
-                      Clear dates
+                      Clear filters
                     </button>
                   ) : null}
                 </div>
@@ -328,19 +369,22 @@ export default function OccupancyPage() {
                 columns={COLUMNS}
                 rows={rowsQ.data}
                 rowKey={(r) => String(r.id ?? r.target_date)}
+                rowClassName={(r) => (sourceMeta(r.source)?.trains === false ? "admin-row-muted" : "")}
                 loading={rowsQ.loading}
                 error={rowsQ.error}
                 onRetry={() => void rowsQ.reload()}
                 errorTitle="We couldn't load occupancy."
                 empty={
-                  from || to
-                    ? "No days in this date range. Try a wider range."
+                  from || to || source
+                    ? "No days match these filters. Try another source or a wider date range."
                     : "No occupancy data yet. Upload a CSV above to get started."
                 }
                 maxHeight="28rem"
               />
               {rowsQ.data && rowsQ.data.length >= 366 ? (
-                <p className="admin-faint mt-2 text-xs">Showing the first 366 days. Use the dates to narrow it down.</p>
+                <p className="admin-faint mt-2 text-xs">
+                  Showing the most recent 366 days, newest first. Use the source or dates to find older days.
+                </p>
               ) : null}
             </section>
           </>
@@ -378,6 +422,20 @@ export default function OccupancyPage() {
               <p className="admin-faint text-xs">
                 Occupancy covers {formatDateRange(db.occupancy_range?.from, db.occupancy_range?.to)}
               </p>
+              {db.by_source ? (
+                <div className="admin-divider space-y-3 pt-3">
+                  <p className="admin-label !mb-0">Occupancy days by source</p>
+                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                    {SOURCE_TILES.map((t) => (
+                      <StatTile key={t.key} label={t.label} value={db.by_source?.[t.key] ?? 0} sub={t.sub} />
+                    ))}
+                  </div>
+                  <p className="admin-faint text-xs">
+                    App-generated days are filler the app creates when a client checks dates. The pricing model never
+                    learns from them.
+                  </p>
+                </div>
+              ) : null}
             </div>
           )}
         </section>

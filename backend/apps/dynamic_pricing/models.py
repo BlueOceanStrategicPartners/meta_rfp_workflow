@@ -17,6 +17,8 @@ class PricingPolicy(models.Model):
     target_markup_pct = models.FloatField(default=0.18)
     anchor_markup_pct = models.FloatField(default=0.08)
     event_multiplier = models.FloatField(default=1.0)
+    # Share of the room rate that is real cost (housekeeping, amenities); feeds the walk-away floor.
+    room_cost_pct = models.FloatField(default=0.55)
     seasonality_json = models.JSONField(default=dict)
     updated_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
@@ -55,6 +57,11 @@ class DynamicPricingQuote(models.Model):
         max_digits=14, decimal_places=2, null=True, blank=True
     )
     used_fallback_engine = models.BooleanField(default=False)
+    engine = models.CharField(max_length=16, default="fallback")  # "model" | "fallback"
+    model_version = models.PositiveIntegerField(null=True, blank=True)
+    fallback_reason = models.CharField(max_length=40, blank=True, default="")
+    inputs_json = models.JSONField(default=dict)
+    explanation_json = models.JSONField(default=dict)
     created_at = models.DateTimeField(auto_now_add=True)
 
 

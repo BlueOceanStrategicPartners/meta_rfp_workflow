@@ -19,6 +19,7 @@ from .views import (
     PricingPolicyView,
     PricingQuotesView,
     PricingRetrainView,
+    QuoteExplanationView,
     PropertyViewSet,
     RFPDetailView,
     RFPListView,
@@ -48,6 +49,7 @@ urlpatterns = [
     path("pricing/model/", PricingModelView.as_view()),
     path("pricing/retrain/", PricingRetrainView.as_view()),
     path("pricing/quotes/", PricingQuotesView.as_view()),
+    path("pricing/quotes/<uuid:pk>/explanation/", QuoteExplanationView.as_view()),
     # Module 4 — negotiations
     path("negotiations/", NegotiationListView.as_view()),
     path("negotiations/<uuid:pk>/takeover/", NegotiationTakeoverView.as_view()),

@@ -30,12 +30,11 @@ def broadcast_rfp(session_id: str, message_type: str, payload: dict) -> None:
 
 
 def _apply_quote_to_cards(rfp: RFPSubmission, quote) -> None:
+    from apps.dynamic_pricing.services import client_quote_card
+
     cards = dict(rfp.active_ui_cards_json or {})
-    cards["live_quote"] = {
-        "anchor_price": float(quote.initial_anchor_price),
-        "floor_price": float(quote.walk_away_floor_price),
-        "target_price": float(quote.optimal_target_price),
-    }
+    # The client sees the opening offer only; floor and target stay server-side (admin only).
+    cards["live_quote"] = client_quote_card(quote)
     rfp.active_ui_cards_json = cards
     rfp.status = RFPStatus.NEGOTIATING
     update_fields = ["active_ui_cards_json", "status", "updated_at"]
@@ -84,7 +83,7 @@ def run_debate_pipeline(rfp_id: str) -> dict:
         broadcast_rfp(
             str(rfp.id),
             "validation_error",
-            {"error": f"Debate used fallback extraction: {exc.__class__.__name__}"},
+            {"error": f"The AI couldn't read this request automatically ({exc.__class__.__name__}). Please check the details on the cards."},
         )
 
     rfp.refresh_from_db()

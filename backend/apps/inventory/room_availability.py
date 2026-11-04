@@ -90,6 +90,7 @@ def ensure_occupancy_rows(property: VenueProperty, start: date, days: int) -> No
             hall_utilization_pct=min(0.85, occ + 0.08),
             adr=215,
             revpar=int(215 * occ),
+            source="generated",  # demo filler: never used to train the pricing model
         )
 
 

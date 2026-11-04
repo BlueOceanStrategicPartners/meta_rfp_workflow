@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import time
 from typing import Any
 
@@ -14,8 +15,45 @@ from apps.designer_studio.proposal_bindings import (
 
 from .critic_agent import CriticAgent
 from .extractor_agent import ExtractorAgent
+from .meta_client import MetaModelAPIError
 from .models import DebateIterationLog, RFPSubmission, RFPStatus
 from .schemas import RFPExtractionPayload
+
+
+# Fields that are only meaningful together: a flag on one re-checks the whole group
+# (e.g. "daily blocks don't sum to the total" can mean either number is wrong).
+LINKED_FIELDS = (
+    {"total_room_nights", "room_blocks"},
+    {"check_in_date", "check_out_date"},
+)
+
+
+def _is_empty(value) -> bool:
+    return value is None or value == []
+
+
+def merge_reextraction(
+    previous: RFPExtractionPayload, fresh: RFPExtractionPayload, field_paths: list[str]
+) -> RFPExtractionPayload:
+    """Apply a targeted re-extraction on top of the previous answer.
+
+    Flagged fields take the fresh value when the model returned one; every other field keeps
+    the previous value (a targeted reply leaves them empty, which must not erase good data).
+    Empty slots in the previous answer are filled from the fresh one.
+    """
+    fields = list(RFPExtractionPayload.model_fields)
+    targets = {re.split(r"[.\[]", path, maxsplit=1)[0] for path in field_paths if path} & set(fields)
+    for group in LINKED_FIELDS:
+        if targets & group:
+            targets |= group
+    update = {}
+    for name in fields:
+        old, new = getattr(previous, name), getattr(fresh, name)
+        if _is_empty(new):
+            continue
+        if not targets or name in targets or _is_empty(old):
+            update[name] = new
+    return previous.model_copy(update=update)
 
 
 class ArbiterOrchestrator:
@@ -33,9 +71,11 @@ class ArbiterOrchestrator:
         rfp.status = RFPStatus.DEBATING
         rfp.save(update_fields=["status", "updated_at"])
         document_text = rfp.source_document_text or "MISMATCH_FIXTURE"
+        sample_mode = bool(getattr(self.extractor, "uses_fixtures", True))
         extraction = self.extractor.extract(document_text, use_spark=False)
         iteration = 1
-        while iteration <= self.MAX_ITERATIONS:
+        field_paths: list[str] = []
+        while True:
             started = time.perf_counter()
             critique = self.critic.critique(document_text, extraction)
             duration_ms = int((time.perf_counter() - started) * 1000)
@@ -65,12 +105,20 @@ class ArbiterOrchestrator:
                 )
                 return extraction
             field_paths = [f.field_path for f in critique.discrepancy_flags]
-            document_text = document_text + "\nMISMATCH_FIXTURE resolved"
-            extraction = self.extractor.extract(
-                document_text,
-                use_spark=True,
-                targeted_fields=field_paths,
-            )
+            if iteration >= self.MAX_ITERATIONS:
+                break  # lock the last *checked* answer; never one the critic has not seen
+            if sample_mode:
+                # Test/demo hook for the canned critic; never added to a real client's text.
+                document_text = document_text + "\nMISMATCH_FIXTURE resolved"
+            try:
+                fresh = self.extractor.extract(
+                    document_text,
+                    use_spark=True,
+                    targeted_fields=field_paths,
+                )
+            except MetaModelAPIError:
+                break  # keep the last good answer; the flagged fields stay amber for the client
+            extraction = merge_reextraction(extraction, fresh, field_paths)
             iteration += 1
         rfp.amber_conflict_fields_json = field_paths
         rfp.verified_extraction_json = extraction.model_dump(mode="json")

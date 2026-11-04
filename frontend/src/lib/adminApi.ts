@@ -227,7 +227,84 @@ export type Quote = {
   created_at: string;
 };
 
-export type QuoteWithRfp = Quote & { rfp_id: string; company_name: string | null };
+/** Which engine priced a quote (XGBoost plan §8). */
+export type QuoteEngine = "model" | "fallback";
+
+/**
+ * Quote row on the Pricing page. The engine fields are optional so the page
+ * still works against a backend that hasn't added them yet (it falls back to `used_fallback`).
+ */
+export type QuoteWithRfp = Quote & {
+  rfp_id: string;
+  company_name: string | null;
+  engine?: QuoteEngine | null;
+  model_version?: number | string | null;
+  fallback_reason?: string | null;
+  /** Plain-words reason, e.g. "No model trained yet". */
+  fallback_reason_label?: string | null;
+};
+
+/** Money from the backend: a decimal string ("61200.00"), sometimes a number. */
+export type Money = string | number;
+
+export type WaterfallStepKind = "base" | "demand" | "clamp" | "rule" | "markup" | "guard";
+
+/** One bar of the "Why this price?" waterfall. `running_total` is the price after this step. */
+export type QuoteExplanationStep = {
+  key: string;
+  label: string;
+  kind: WaterfallStepKind | (string & {});
+  amount: Money;
+  running_total: Money;
+  /** Set on the step whose running total is the target ("target") or the anchor ("anchor"). */
+  ends: "target" | "anchor" | null;
+};
+
+/** Floor breakdown: operating cost, then the margin. Ends at the floor. */
+export type QuoteFloorStep = {
+  key: string;
+  label: string;
+  amount: Money;
+  running_total: Money;
+};
+
+export type QuoteExplanationInputs = {
+  check_in: string | null;
+  check_out: string | null;
+  nights: number | null;
+  /** True when the client hasn't confirmed dates, so the price is an estimate. */
+  dates_assumed: boolean;
+  room_nights: number | null;
+  peak_rooms_per_night: number | null;
+  room_rate: Money | null;
+  rooms_part: Money | null;
+  space_id: string | null;
+  space_name: string | null;
+  event_days: number | null;
+  space_rate: Money | null;
+  space_part: Money | null;
+  base_price: Money | null;
+  operating_cost: Money | null;
+  warnings: string[];
+};
+
+/** GET pricing/quotes/<id>/explanation/ (XGBoost plan §8, frozen contract). */
+export type QuoteExplanation = {
+  quote_id: string;
+  rfp_id: string;
+  company_name: string | null;
+  created_at: string;
+  engine: QuoteEngine;
+  model_version: number | string | null;
+  fallback_reason: string | null;
+  fallback_reason_label: string | null;
+  inputs: QuoteExplanationInputs;
+  steps: QuoteExplanationStep[];
+  floor_steps: QuoteFloorStep[];
+  floor: Money | null;
+  target: Money | null;
+  anchor: Money | null;
+};
 
 export type RfpCards = {
   event_overview?: Record<string, unknown>;
@@ -290,14 +367,53 @@ export type PricingPolicy = {
 
 export type PricingPolicyInput = Omit<PricingPolicy, "updated_by" | "updated_at">;
 
+/**
+ * Model quality on the held-back days. `mape` and `improvement_pct` are percent
+ * numbers (4.12 = 4.12%), as the training code writes them; `mae`s are in demand-index units.
+ */
+export type PricingMetrics = {
+  mae: number | null;
+  mape: number | null;
+  baseline_mae: number | null;
+  improvement_pct: number | null;
+};
+
+export type FeatureImportance = { feature: string; label: string; importance: number };
+
+/** Occupancy row counts by where the data came from. */
+export type OccupancySourceCounts = { imported: number; demo: number; manual: number; generated: number };
+
 export type PricingModelStatus = {
   artifact_exists: boolean;
   trained_at: string | null;
   occupancy_rows: number;
   min_rows_required: number;
+  // XGBoost plan §8. Optional so an older backend without them still renders.
+  version?: number | string | null;
+  is_active?: boolean | null;
+  inactive_reason?: string | null;
+  rows_used?: number | null;
+  date_from?: string | null;
+  date_to?: string | null;
+  metrics?: PricingMetrics | null;
+  /** Top factor first. */
+  feature_importance?: FeatureImportance[] | null;
+  /** `trainable` = real (non-generated) days before today. */
+  data?: (OccupancySourceCounts & { trainable: number }) | null;
+  last_error?: string | null;
 };
 
-export type RetrainResult = { status: "ok" | "skipped_insufficient_data" | string; trained_at: string | null };
+export type RetrainStatus = "ok" | "skipped_insufficient_data" | "inactive_not_better" | "error";
+
+export type RetrainResult = {
+  status: RetrainStatus | (string & {});
+  detail?: string | null;
+  trained_at: string | null;
+  version?: number | string | null;
+  metrics?: PricingMetrics | null;
+  rows_available?: number | null;
+  rows_required?: number | null;
+};
 
 export type NegotiationItem = {
   id: string;
@@ -375,7 +491,11 @@ export type OccupancyRow = {
   revpar: string;
   is_peak_season: boolean;
   local_event_multiplier: number | null;
+  /** imported | demo | manual | generated. Generated rows never train the model. */
+  source?: OccupancySource | null;
 };
+
+export type OccupancySource = "imported" | "demo" | "manual" | "generated" | (string & {});
 
 export type OccupancyUploadReport = {
   created: number;
@@ -389,6 +509,7 @@ export type DbSummary = {
   vendor: string;
   tables: Record<string, number>;
   occupancy_range: { from: string | null; to: string | null } | null;
+  by_source?: OccupancySourceCounts | null;
 };
 
 export type TelemetryData = {
@@ -439,6 +560,8 @@ export const getPricingModel = () => request<PricingModelStatus>("pricing/model/
 export const retrainPricingModel = () => request<RetrainResult>("pricing/retrain/", json("POST"));
 export const listQuotes = (params: { rfp?: string } = {}) =>
   request<QuoteWithRfp[]>("pricing/quotes/", {}, params);
+export const getQuoteExplanation = (quoteId: string) =>
+  request<QuoteExplanation>(`pricing/quotes/${encodeURIComponent(quoteId)}/explanation/`);
 
 // Module 4 — Negotiations
 export const listNegotiations = () => request<NegotiationItem[]>("negotiations/");
@@ -471,7 +594,7 @@ export const releaseSpace = (id: string) =>
   request<Space>(`inventory/spaces/${encodeURIComponent(id)}/release/`, json("POST"));
 
 // Module 6 — Occupancy
-export const listOccupancy = (params: { property?: string; from?: string; to?: string } = {}) =>
+export const listOccupancy = (params: { property?: string; from?: string; to?: string; source?: string } = {}) =>
   request<OccupancyRow[]>("occupancy/", {}, params);
 export function uploadOccupancy(file: File, property: string) {
   const form = new FormData();

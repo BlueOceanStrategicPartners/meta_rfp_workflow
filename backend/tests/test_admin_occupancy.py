@@ -69,3 +69,25 @@ def test_list_filters_and_summary(admin_client, demo_property):
     assert summary["engine"] == "sqlite" and summary["vendor"] == "sqlite"
     assert summary["tables"]["occupancy"] == 3
     assert summary["occupancy_range"] == {"from": "2026-06-01", "to": "2026-07-01"}
+
+
+@pytest.mark.django_db
+def test_list_shows_newest_first_and_filters_by_source(admin_client, demo_property):
+    from datetime import date, timedelta
+
+    start = date(2024, 1, 1)
+    HistoricalOccupancy.objects.bulk_create(
+        [HistoricalOccupancy(property=demo_property, target_date=start + timedelta(days=i), source="demo",
+                             room_occupancy_pct=0.5, adr=100, revpar=50) for i in range(400)]
+    )
+    HistoricalOccupancy.objects.create(property=demo_property, target_date=date(2026, 7, 1), source="imported",
+                                       room_occupancy_pct=0.7, adr=200, revpar=140)
+    HistoricalOccupancy.objects.create(property=demo_property, target_date=date(2026, 6, 1), source="generated",
+                                       room_occupancy_pct=0.6, adr=215, revpar=129)
+    url = f"/api/admin-center/occupancy/?property={demo_property.id}"
+    rows = admin_client.get(url).json()
+    assert len(rows) == 366
+    assert rows[0]["target_date"] == "2026-07-01" and rows[1]["source"] == "generated"  # recent days visible at once
+    only_generated = admin_client.get(url + "&source=generated").json()
+    assert [r["target_date"] for r in only_generated] == ["2026-06-01"]
+    assert admin_client.get("/api/admin-center/occupancy/?source=nope").status_code == 400

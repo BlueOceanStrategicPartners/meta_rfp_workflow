@@ -108,3 +108,26 @@ def _move_to_future(rfp):
     cards["event_overview"] = overview
     rfp.active_ui_cards_json = cards
     rfp.save(update_fields=["active_ui_cards_json"])
+
+
+@pytest.fixture(autouse=True)
+def _isolated_pricing_artifacts(tmp_path, monkeypatch):
+    """Trained pricing models go to a temp folder in tests, never into backend/artifacts."""
+    from apps.dynamic_pricing import model_store
+
+    monkeypatch.setattr(model_store, "ARTIFACT_ROOT", tmp_path / "pricing")
+    model_store._booster_cache.clear()
+    yield
+    model_store._booster_cache.clear()
+
+
+@pytest.fixture
+def demo_history(demo_property):
+    """Three years of realistic demo occupancy (source="demo") for training tests."""
+    from apps.dynamic_pricing.management.commands.seed_occupancy_history import generate_rows
+    from apps.inventory.models import HistoricalOccupancy
+
+    HistoricalOccupancy.objects.bulk_create(
+        [HistoricalOccupancy(property=demo_property, source="demo", **row) for row in generate_rows(3)]
+    )
+    return demo_property
