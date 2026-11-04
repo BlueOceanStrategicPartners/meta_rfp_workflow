@@ -1843,6 +1843,19 @@ body {
     width: 100%;
   }
 
+  .studio-live-preview-iframe-scroll {
+    @apply relative h-full min-h-0 w-full;
+  }
+
+  .studio-live-preview-iframe-scroll__viewport {
+    @apply h-full min-h-0 overflow-hidden;
+  }
+
+  .studio-live-preview-iframe-scroll .client-custom-scroll__track {
+    z-index: 4;
+    opacity: 0.95;
+  }
+
   .studio-live-preview-scroll::-webkit-scrollbar {
     width: 9px;
   }

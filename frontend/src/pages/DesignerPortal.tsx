@@ -1,4 +1,5 @@
 import PreviewAutomationIndicator from "../components/designer/PreviewAutomationIndicator";
+import DesignerPreviewIframeScroll from "../components/designer/DesignerPreviewIframeScroll";
 import PreviewTargetHighlight from "../components/designer/PreviewTargetHighlight";
 import {
   runPreviewPanelAutomation,
@@ -1344,18 +1345,24 @@ const PREVIEW_ISSUE_MESSAGE = /preview|not showing|close button|looks wrong|debu
                     previewPickMode ? " studio-live-preview-scroll--pick" : ""
                   }`}
                 >
-                  <iframe
-                    ref={previewIframeRef}
-                    title="Proposal preview"
-                    className="studio-live-preview-iframe"
-                    sandbox="allow-scripts allow-same-origin"
+                  <DesignerPreviewIframeScroll
+                    iframeRef={previewIframeRef}
                     srcDoc={previewDoc}
-                    style={
-                      livePreviewIframeHeight
-                        ? { height: `${livePreviewIframeHeight}px` }
-                        : { height: "100%", minHeight: "100%" }
-                    }
-                  />
+                    className="absolute inset-0"
+                  >
+                    <iframe
+                      ref={previewIframeRef}
+                      title="Proposal preview"
+                      className="studio-live-preview-iframe"
+                      sandbox="allow-scripts allow-same-origin"
+                      srcDoc={previewDoc}
+                      style={
+                        livePreviewIframeHeight
+                          ? { height: `${livePreviewIframeHeight}px` }
+                          : { height: "100%", minHeight: "100%" }
+                      }
+                    />
+                  </DesignerPreviewIframeScroll>
                   <PreviewTargetHighlight
                     hoverBox={previewHoverBox}
                     lockedBox={previewLockedBox}
