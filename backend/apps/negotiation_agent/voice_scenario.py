@@ -240,6 +240,13 @@ def generate_voice_assistant_reply(
                 bits.append(f"{room['peak_rooms']} rooms")
             if meeting.get("headcount"):
                 bits.append(f"meeting headcount to {meeting['headcount']}")
+            if meeting.get("seating_style"):
+                bits.append(f"seating to {str(meeting['seating_style']).replace('-', ' ')}")
+            catering_av = applied.get("catering_av") or {}
+            if catering_av.get("catering"):
+                bits.append("catering notes")
+            if catering_av.get("av"):
+                bits.append("AV specs")
             if room.get("total_room_nights") and not overview:
                 n = int(room["total_room_nights"])
                 bits.append(f"the room block to {n} night{'s' if n != 1 else ''}")
@@ -259,6 +266,9 @@ def generate_voice_assistant_reply(
 
         if _user_confirms_booking(lower):
             rate = _format_usd(quote.get("anchor_price"))
+            from .proposal_render import render_proposal_for_rfp
+
+            render_proposal_for_rfp(rfp)
             if rate:
                 return (
                     f"Great — I'll prepare the proposal for {label} at the estimated rate of {rate} "

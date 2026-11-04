@@ -122,6 +122,8 @@ export function useBidirectionalAgentUI(
     }
   }, []);
 
+  const clearProposalHtml = useCallback(() => setProposalHtml(null), []);
+
   return {
     cards,
     clientSession,
@@ -134,6 +136,8 @@ export function useBidirectionalAgentUI(
     markCardSaving,
     setCards,
     hydrateSession,
+    clearProposalHtml,
+    setProposalHtml,
   };
 }
 

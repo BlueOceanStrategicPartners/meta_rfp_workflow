@@ -527,6 +527,27 @@ body {
     @apply border-amber-400/50 bg-amber-950/20;
   }
 
+  .client-side-textarea {
+    @apply leading-snug;
+  }
+
+  .client-composer-back {
+    @apply border border-white/15 text-white/85 hover:bg-white/10;
+  }
+
+  .client-mini-orb {
+    @apply text-cyan-100/90;
+  }
+
+  .proposal-iframe-layer {
+    pointer-events: auto;
+  }
+
+  .proposal-iframe {
+    display: block;
+    color-scheme: normal;
+  }
+
   .client-side-select__trigger {
     @apply cursor-pointer;
   }

@@ -23,9 +23,12 @@ function roleLabel(role: string) {
   return role;
 }
 
+const DIALOGUE_EVENT_TYPES = new Set(["voice", "assistant_reply", "card_edit"]);
+
 export default function ClientSessionTimeline({ session }: Props) {
-  const events = (session?.events || []).slice(-6);
+  const events = (session?.events || []).slice(-8);
   const transcript = (session?.transcript || []).slice(-6);
+  const showTranscript = transcript.length > 0 && !events.some((ev) => DIALOGUE_EVENT_TYPES.has(String(ev.type || "")));
 
   if (events.length === 0 && transcript.length === 0) return null;
 
@@ -51,20 +54,21 @@ export default function ClientSessionTimeline({ session }: Props) {
             </span>
           </li>
         ))}
-        {transcript.map((turn, i) => (
-          <li
-            key={`tx-${turn.at || i}-${turn.role}`}
-            className="client-side-timeline-item client-side-timeline-item--transcript text-[11px] leading-snug"
-          >
-            {turn.at && (
-              <time className="client-side-timeline-item__time block text-[10px]">{formatWhen(turn.at)}</time>
-            )}
-            <span className="client-side-timeline-item__body">
-              <span className="client-side-timeline-item__type mr-1 font-medium">{roleLabel(turn.role)}:</span>
-              {turn.text}
-            </span>
-          </li>
-        ))}
+        {showTranscript &&
+          transcript.map((turn, i) => (
+            <li
+              key={`tx-${turn.at || i}-${turn.role}`}
+              className="client-side-timeline-item client-side-timeline-item--transcript text-[11px] leading-snug"
+            >
+              {turn.at && (
+                <time className="client-side-timeline-item__time block text-[10px]">{formatWhen(turn.at)}</time>
+              )}
+              <span className="client-side-timeline-item__body">
+                <span className="client-side-timeline-item__type mr-1 font-medium">{roleLabel(turn.role)}:</span>
+                {turn.text}
+              </span>
+            </li>
+          ))}
       </ul>
     </div>
   );

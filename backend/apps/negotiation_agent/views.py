@@ -13,6 +13,7 @@ from apps.guardrails.validators import enforce_floor_price, validate_negotiation
 from apps.inventory.locking import lock_zone_for_booking
 from apps.rfp_debate.models import RFPStatus, RFPSubmission
 
+from .negotiation_renderers import ServerSentEventsRenderer
 from .voice_assistant import generate_voice_assistant_reply_for_rfp, iter_voice_assistant_stream
 from .availability_inquiry import try_availability_response
 
@@ -104,6 +105,7 @@ class VoiceAssistantChatStreamView(APIView):
 
     permission_classes = []
     authentication_classes = []
+    renderer_classes = [ServerSentEventsRenderer]
 
     def post(self, request):
         message = request.data.get("message", "")

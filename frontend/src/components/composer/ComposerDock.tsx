@@ -1,4 +1,4 @@
-import { FormEvent, useRef, useState } from "react";
+import { FormEvent, ReactNode, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import BottomTriangleToggle from "./BottomTriangleToggle";
 
@@ -18,10 +18,24 @@ type Props = {
   onToggle: () => void;
   onSend: (text: string) => void;
   onUpload: (files: FileList) => void;
+  proposalMode?: boolean;
+  onBackFromProposal?: () => void;
+  leadingSlot?: ReactNode;
 };
 
-/** Fixed bottom dock — centered with flex (avoids Framer transform breaking translate-x centering). */
-export default function ComposerDock({ open, onToggle, onSend, onUpload }: Props) {
+const COMPOSER_PANEL =
+  "client-composer-panel pointer-events-auto mx-auto flex w-[min(640px,calc(100vw-2rem))] items-center gap-2 rounded-full py-2 pl-3 pr-3.5 shadow-lg backdrop-blur sm:py-2.5 sm:pl-3.5 sm:pr-4";
+
+/** Fixed bottom dock — same pill composer in intake and proposal (proposal adds back + mini orb). */
+export default function ComposerDock({
+  open,
+  onToggle,
+  onSend,
+  onUpload,
+  proposalMode = false,
+  onBackFromProposal,
+  leadingSlot,
+}: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const [hasText, setHasText] = useState(false);
@@ -43,30 +57,47 @@ export default function ComposerDock({ open, onToggle, onSend, onUpload }: Props
       className="fixed inset-x-0 bottom-0 z-50 flex flex-col items-center pointer-events-none pb-[max(0.5rem,env(safe-area-inset-bottom))]"
       aria-label="Message composer"
     >
-      <div className="pointer-events-auto mb-1">
-        <BottomTriangleToggle open={open} onToggle={onToggle} />
-      </div>
-      {open && (
+      {!proposalMode && (
+        <div className="pointer-events-auto mb-1">
+          <BottomTriangleToggle open={open} onToggle={onToggle} />
+        </div>
+      )}
+      {(open || proposalMode) && (
         <motion.form
           initial={{ opacity: 0, y: 16 }}
           animate={{ opacity: 1, y: 0 }}
           onSubmit={handleSubmit}
-          className="client-composer-panel pointer-events-auto mx-auto flex w-[min(640px,calc(100vw-2rem))] items-center gap-2 rounded-full py-2 pl-3 pr-3.5 shadow-lg backdrop-blur sm:py-2.5 sm:pl-3.5 sm:pr-4"
+          className={COMPOSER_PANEL}
         >
-          <motion.button
-            type="button"
-            whileHover={{ scale: 1.04 }}
-            whileTap={{ scale: 0.96 }}
-            className="client-composer-attach flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-lg leading-none"
-            aria-label="Attach files"
-            onClick={() => fileRef.current?.click()}
-          >
-            +
-          </motion.button>
+          {proposalMode && onBackFromProposal ? (
+            <motion.button
+              type="button"
+              whileHover={{ scale: 1.04 }}
+              whileTap={{ scale: 0.96 }}
+              className="client-composer-back flex h-10 shrink-0 items-center justify-center rounded-full px-3.5 text-xs font-medium"
+              aria-label="Back to summary cards"
+              onClick={onBackFromProposal}
+            >
+              Back
+            </motion.button>
+          ) : null}
+          {leadingSlot}
+          {!proposalMode && (
+            <motion.button
+              type="button"
+              whileHover={{ scale: 1.04 }}
+              whileTap={{ scale: 0.96 }}
+              className="client-composer-attach flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-lg leading-none"
+              aria-label="Attach files"
+              onClick={() => fileRef.current?.click()}
+            >
+              +
+            </motion.button>
+          )}
           <input
             ref={inputRef}
             className="client-composer-input min-h-10 flex-1 min-w-0 bg-transparent px-1 text-sm outline-none"
-            placeholder="Type your RFP details…"
+            placeholder={proposalMode ? "Ask about your proposal…" : "Type your RFP details…"}
             onChange={(e) => setHasText(e.target.value.trim().length > 0)}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {

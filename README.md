@@ -42,6 +42,8 @@ npm run dev
 | `DB_ENGINE_MODE` | `sqlite` (default) or `azuresql` |
 | `META_MODEL_API_KEY` | Meta Model API key (`https://api.meta.ai/v1`; local fixtures if empty or `USE_FIXTURE_DEBATE=1`) |
 | `META_MODEL_SPARK` | Default `muse-spark-1.3` |
+| `META_MODEL_CLIENT_ASSISTANT` | Client RFP voice assistant model (default `muse-spark-1.3`; use `muse-spark-1.3-contributor` for contributor tier) |
+| `META_MODEL_CLIENT_ASSISTANT_REASONING_EFFORT` | Default `low` for faster replies (`none` to omit) |
 | `META_MODEL_WONDER` | Default `muse-wonder` (Designer validation, initial extraction) |
 | `USE_FIXTURE_DEBATE` | Deterministic 3-agent debate for demos/tests |
 | `USE_SEAMLESS_FIXTURE` | `1` = WAV stub; `0` = load **SeamlessM4T v2** (needs `requirements-voice.txt`) |

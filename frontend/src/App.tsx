@@ -6,6 +6,7 @@ import {
   IconNavAdmin,
   IconNavClient,
   IconNavDesigner,
+  IconNavSubtitles,
 } from "./components/AppNavIcons";
 import { useAppShell } from "./context/AppShellContext";
 import { logoutDesigner } from "./lib/designerApi";
@@ -20,9 +21,12 @@ const PRIMARY_NAV = [
 ] as const;
 
 export default function App() {
-  const { theme, toggleTheme, designerAuthed, setDesignerAuthed } = useAppShell();
+  const { theme, toggleTheme, designerAuthed, setDesignerAuthed, clientSubtitlesEnabled, toggleClientSubtitles, clientProposalFullscreen } =
+    useAppShell();
   const location = useLocation();
   const navigate = useNavigate();
+
+  const onClient = location.pathname === "/" || location.pathname.startsWith("/client");
 
   const navLinkClass =
     (to: string) =>
@@ -67,7 +71,7 @@ export default function App() {
           if (!logoutBusy) void handleLogout();
         }}
       />
-      <header className="app-shell-header" role="banner">
+      <header className={`app-shell-header ${clientProposalFullscreen ? "hidden" : ""}`} role="banner">
         <div className="app-shell-header__brand">
           <span className="app-shell-header__brand-title">RFP Engine</span>
           <span className="app-shell-header__brand-sep">/</span>
@@ -81,6 +85,16 @@ export default function App() {
           </nav>
         </div>
         <div className="app-shell-header__actions studio-toolbar">
+          {onClient && (
+            <TemplateIconButton
+              compact
+              label={clientSubtitlesEnabled ? "Hide subtitles" : "Show subtitles"}
+              selected={clientSubtitlesEnabled}
+              onClick={toggleClientSubtitles}
+            >
+              <IconNavSubtitles off={!clientSubtitlesEnabled} />
+            </TemplateIconButton>
+          )}
           <TemplateIconButton
             compact
             label={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}

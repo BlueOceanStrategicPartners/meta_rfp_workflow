@@ -91,8 +91,17 @@ def normalize_session(raw: dict | None) -> dict[str, Any]:
                 "availability_window_days",
                 "headcount",
                 "peak_rooms",
+                "room_nights",
+                "nights",
             )
         }
+    handoff = raw.get("turn_handoff")
+    if isinstance(handoff, dict):
+        from apps.negotiation_agent.client_turn_handoff import normalize_turn_handoff
+
+        normalized = normalize_turn_handoff(handoff)
+        if normalized:
+            base["turn_handoff"] = normalized
     return base
 
 
@@ -181,7 +190,10 @@ def sync_clarifications_from_cards(rfp: RFPSubmission) -> dict[str, Any]:
     session["agent_todos"] = todos[:16]
     session["last_cards_hash"] = cards_fingerprint(cards)
     rfp.client_session_json = session
-    return session
+    from apps.negotiation_agent.client_turn_handoff import refresh_turn_handoff
+
+    refresh_turn_handoff(rfp)
+    return normalize_session(rfp.client_session_json)
 
 
 def summarize_cards_for_agent(rfp: RFPSubmission) -> str:
@@ -192,7 +204,17 @@ def build_agent_context_block(rfp: RFPSubmission | None) -> str:
     if not rfp:
         return ""
     session = normalize_session(rfp.client_session_json)
-    parts = [MEMORY_PREFIX, summarize_cards_for_agent(rfp)]
+    from apps.negotiation_agent.client_turn_handoff import (
+        build_turn_handoff,
+        format_turn_handoff_for_prompt,
+    )
+
+    handoff = session.get("turn_handoff") or build_turn_handoff(rfp)
+    parts = [
+        MEMORY_PREFIX,
+        format_turn_handoff_for_prompt(handoff),
+        summarize_cards_for_agent(rfp),
+    ]
     recent = session["events"][-5:]
     if recent:
         parts.append("Recent session events:")
@@ -249,6 +271,11 @@ def describe_card_patch(patch: dict) -> str:
         bits.append(f"{room.get('total_room_nights')} room nights")
     if room.get("peak_rooms") is not None:
         bits.append(f"{room.get('peak_rooms')} peak rooms")
+    catering_av = patch.get("catering_av") or {}
+    if catering_av.get("catering"):
+        bits.append("catering notes")
+    if catering_av.get("av"):
+        bits.append("AV specs")
     return ", ".join(bits) if bits else "event details"
 
 
@@ -294,14 +321,36 @@ def record_assistant_reply(rfp: RFPSubmission, text: str) -> None:
     session["events"] = (session.get("events") or []) + [entry]
     session["events"] = session["events"][-MAX_EVENTS:]
     rfp.client_session_json = session
+    from apps.negotiation_agent.client_turn_handoff import refresh_turn_handoff
+
+    refresh_turn_handoff(rfp)
+
+
+def _sanitize_user_message_text(text: str) -> str:
+    cleaned = (text or "").strip()
+    if cleaned.lower().startswith("undefined"):
+        cleaned = cleaned[len("undefined") :].strip()
+    return cleaned
 
 
 def record_voice_turn(rfp: RFPSubmission, user_message: str) -> None:
-    cleaned = user_message.strip()
+    cleaned = _sanitize_user_message_text(user_message)
     session = normalize_session(getattr(rfp, "client_session_json", None))
     if cleaned:
+        transcript = session.get("transcript") or []
+        if transcript:
+            last = transcript[-1]
+            if (
+                last.get("role") == "user"
+                and (last.get("text") or "").strip() == cleaned[:2000]
+            ):
+                rfp.client_session_json = session
+                return
         _append_transcript_turn(session, role="user", text=cleaned)
         rfp.client_session_json = session
+        from apps.negotiation_agent.client_turn_handoff import refresh_turn_handoff
+
+        refresh_turn_handoff(rfp)
     append_session_event(
         rfp,
         event_type="voice",

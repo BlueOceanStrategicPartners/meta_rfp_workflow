@@ -131,6 +131,11 @@ CHANNEL_LAYERS = {
 META_MODEL_API_KEY = os.getenv("META_MODEL_API_KEY") or os.getenv("LLM_API_KEY", "")
 META_MODEL_API_BASE = os.getenv("META_MODEL_API_BASE", "https://api.meta.ai/v1")
 META_MODEL_SPARK = os.getenv("META_MODEL_SPARK", "muse-spark-1.3")
+# Client RFP assistant: Muse Spark (fast). Override model id or use contributor tier via env.
+META_MODEL_CLIENT_ASSISTANT = os.getenv("META_MODEL_CLIENT_ASSISTANT", "muse-spark-1.3")
+META_MODEL_CLIENT_ASSISTANT_REASONING_EFFORT = os.getenv(
+    "META_MODEL_CLIENT_ASSISTANT_REASONING_EFFORT", "low"
+)
 # Muse scaffold/repair JSON can exceed 120s; designer tool loop needs a longer read timeout.
 META_MODEL_HTTP_TIMEOUT = float(os.getenv("META_MODEL_HTTP_TIMEOUT", "300"))
 # Log truncated Muse request/response bodies to the console (local debugging).

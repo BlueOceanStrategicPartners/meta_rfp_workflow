@@ -77,3 +77,25 @@ export async function waitForRfpCards(
   }
   return fetchRfpCards(sessionId);
 }
+
+export async function renderClientProposal(sessionId: string): Promise<string | null> {
+  try {
+    const res = await apiFetch(`/api/pricing/render/${sessionId}/`, { method: "POST", body: "{}" });
+    if (!res.ok) return null;
+    const data = (await res.json()) as { html?: string };
+    return data.html ? String(data.html) : null;
+  } catch {
+    return null;
+  }
+}
+
+function userMessageConfirmsBooking(message: string): boolean {
+  const lower = message.trim().toLowerCase();
+  if (!lower) return false;
+  if (/\bapprove\b/.test(lower)) return true;
+  if (/\b(confirm|looks good|ready to book)\b/.test(lower)) return true;
+  if (/\b(book it|book now|go ahead and book)\b/.test(lower)) return true;
+  return false;
+}
+
+export { userMessageConfirmsBooking };

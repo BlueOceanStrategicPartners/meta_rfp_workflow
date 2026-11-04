@@ -122,6 +122,102 @@ def parse_calendar_date_phrase(message: str, *, ref: date | None = None) -> date
     return None
 
 
+def message_mentions_checkout(message: str) -> bool:
+    lower = (message or "").lower()
+    if re.search(r"\bcheck[\s-]?out\b|\bcheckout\b", lower):
+        return True
+    if re.search(r"\bdepart(?:ing|ure)?\b|\bleav(?:e|ing)\b", lower):
+        return True
+    return False
+
+
+def message_mentions_checkin(message: str) -> bool:
+    lower = (message or "").lower()
+    return bool(
+        re.search(r"\bcheck[\s-]?in\b|\barriv(?:e|al|ing)\b", lower)
+        or parse_weekday_index(message) is not None
+    )
+
+
+def parse_duration_nights_from_voice(message: str) -> int | None:
+    """Spoken length of stay without the word 'nights' (e.g. only one day)."""
+    lower = (message or "").lower()
+    if re.search(
+        r"\b(?:only|just|for|we'?re|we are)\s+(?:in for\s+)?(?:one|a|1)\s+day\b"
+        r"|\bone[\s-]day\b|\bsingle\s+day\b|\bday\s+trip\b",
+        lower,
+    ):
+        return 1
+    if re.search(r"\b(?:two|2)\s+days?\b", lower) and "night" not in lower:
+        return 2
+    return None
+
+
+def parse_checkout_date_from_voice(
+    message: str,
+    *,
+    ref: date | None = None,
+) -> date | None:
+    """Resolve a calendar date the client gave as check-out (not arrival)."""
+    if not message_mentions_checkout(message):
+        return None
+    ref = ref or voice_today()
+    lower = (message or "").lower()
+    explicit = parse_calendar_date_phrase(message, ref=ref)
+    if explicit is not None:
+        return explicit
+    m = re.search(
+        r"\b(?:check[\s-]?out|checkout|depart(?:ing|ure)?|leave|leaving)\s*(?:on|will be|is|the)?\s*"
+        r"(\d{1,2})(?:st|nd|rd|th)?\b",
+        lower,
+    )
+    if m:
+        return next_future_date(int(m.group(1)), ref)
+    return None
+
+
+def parse_stay_from_checkout_and_duration(
+    message: str,
+    *,
+    ref: date | None = None,
+) -> tuple[date, date] | None:
+    """Check-out date plus 'one day' / N nights → full stay."""
+    ref = ref or voice_today()
+    checkout = parse_checkout_date_from_voice(message, ref=ref)
+    if checkout is None:
+        return None
+    nights = parse_duration_nights_from_voice(message)
+    if nights is None:
+        m = re.search(
+            r"\b(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s*nights?\b",
+            (message or "").lower(),
+        )
+        if m:
+            token = m.group(1)
+            if token.isdigit():
+                nights = int(token)
+            else:
+                words = {
+                    "one": 1,
+                    "two": 2,
+                    "three": 3,
+                    "four": 4,
+                    "five": 5,
+                    "six": 6,
+                    "seven": 7,
+                    "eight": 8,
+                    "nine": 9,
+                    "ten": 10,
+                }
+                nights = words.get(token)
+    if not nights or nights < 1:
+        return None
+    check_in = checkout - timedelta(days=nights)
+    if check_in >= checkout:
+        check_in = checkout - timedelta(days=1)
+    return check_in, checkout
+
+
 def parse_arrival_date_from_voice(
     message: str,
     *,
@@ -130,6 +226,8 @@ def parse_arrival_date_from_voice(
     ref: date | None = None,
 ) -> date | None:
     """Best-effort arrival date from weekday names, month/day phrases, or ISO."""
+    if message_mentions_checkout(message) and not message_mentions_checkin(message):
+        return None
     ref = ref or voice_today()
     explicit = parse_calendar_date_phrase(message, ref=ref)
     if explicit is not None:

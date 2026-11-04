@@ -68,3 +68,22 @@ export function IconNavAdmin() {
     </svg>
   );
 }
+
+/** Closed captions — client voice transcript toggle */
+export function IconNavSubtitles({ off = false }: { off?: boolean }) {
+  return (
+    <svg
+      width={NAV_ICON_SIZE}
+      height={NAV_ICON_SIZE}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={NAV_ICON_STROKE}
+      aria-hidden
+    >
+      <rect x="3" y="5" width="18" height="14" rx="2" />
+      <path d="M7 15h4M7 11h6" />
+      {off ? <path d="M4 4l16 16" /> : null}
+    </svg>
+  );
+}

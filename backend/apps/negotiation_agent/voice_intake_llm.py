@@ -8,6 +8,8 @@ from django.conf import settings
 from apps.rfp_debate.meta_client import MetaModelAPIError, MetaModelClient
 from apps.rfp_debate.models import RFPSubmission
 
+from .muse_client import client_assistant_model_id, client_assistant_reasoning_effort
+from .voice_intake_apply import apply_intake_classification_to_cards
 from .voice_intake_gates import build_llm_intake_context
 from .voice_prompts import INTAKE_CLASSIFIER_SYSTEM, intake_classifier_user
 
@@ -29,7 +31,8 @@ def try_llm_intake_reply(rfp: RFPSubmission, message: str, *, rooms_free: int | 
     client = MetaModelClient()
     try:
         raw = client.complete_json(
-            model_id=settings.META_MODEL_SPARK,
+            model_id=client_assistant_model_id(),
+            reasoning_effort=client_assistant_reasoning_effort(),
             system_prompt=INTAKE_CLASSIFIER_SYSTEM,
             user_content=intake_classifier_user(context, cleaned, rooms_free=rooms_free),
             fixture_kind="voice_intake_classify",
@@ -47,4 +50,6 @@ def try_llm_intake_reply(rfp: RFPSubmission, message: str, *, rooms_free: int | 
     reply = raw.get("reply")
     if confidence < 0.85 or not isinstance(reply, str) or not reply.strip():
         return None
+    if apply_intake_classification_to_cards(rfp, raw):
+        rfp.save(update_fields=["client_session_json", "active_ui_cards_json", "updated_at"])
     return reply.strip()

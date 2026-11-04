@@ -10,6 +10,12 @@ export type RfpCardFormState = {
   avSpecs: string;
 };
 
+function cardFieldString(value: unknown): string {
+  if (value == null) return "";
+  const s = String(value).trim();
+  return s === "undefined" ? "" : s;
+}
+
 export function cardsToFormState(cards: Record<string, unknown>): RfpCardFormState {
   const overview = (cards.event_overview as Record<string, unknown>) || {};
   const meeting = (cards.meeting_space as Record<string, unknown>) || {};
@@ -21,9 +27,9 @@ export function cardsToFormState(cards: Record<string, unknown>): RfpCardFormSta
     headcount: meeting.headcount != null ? String(meeting.headcount) : "",
     peakRooms: room.peak_rooms != null ? String(room.peak_rooms) : "",
     totalRoomNights: room.total_room_nights != null ? String(room.total_room_nights) : "",
-    seatingStyle: String(meeting.seating_style || "classroom"),
-    cateringNotes: String(cateringAv.catering ?? ""),
-    avSpecs: String(cateringAv.av ?? ""),
+    seatingStyle: cardFieldString(meeting.seating_style) || "classroom",
+    cateringNotes: cardFieldString(cateringAv.catering),
+    avSpecs: cardFieldString(cateringAv.av),
   };
 }
 
@@ -62,6 +68,12 @@ export function formStateToPatch(
   }
   if (next.avSpecs !== prev.avSpecs) {
     cateringAv.av = next.avSpecs;
+    if (next.avSpecs) {
+      patch.meeting_space = {
+        ...((patch.meeting_space as Record<string, unknown>) || {}),
+        av: next.avSpecs,
+      };
+    }
   }
   if (Object.keys(cateringAv).length) patch.catering_av = cateringAv;
 

@@ -331,6 +331,7 @@ class MetaModelClient:
         model_id: str,
         system_prompt: str,
         user_content: str,
+        reasoning_effort: str | None = None,
     ):
         """Yield spoken text fragments (plain text, not JSON)."""
         if settings.USE_FIXTURE_DEBATE or not self.api_key:
@@ -347,6 +348,8 @@ class MetaModelClient:
                 {"role": "user", "content": user_content},
             ],
         }
+        if reasoning_effort:
+            payload["reasoning_effort"] = reasoning_effort
         headers = {"Authorization": f"Bearer {self.api_key}"}
         try:
             with httpx.Client(timeout=120.0) as client:

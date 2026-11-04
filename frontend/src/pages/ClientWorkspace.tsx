@@ -14,15 +14,20 @@ import { unlockBrowserAudio, primeAudioSync, useSeamlessM4TV2 } from "../hooks/u
 import type { AgentUiComponent } from "../lib/agentUiComponents";
 import { useClientCardDeckVisibility } from "../hooks/useClientCardDeckVisibility";
 import { cardsHaveIdentifiedFields, messageIsSocialGreeting, quickVoiceAck, shouldEnsureRfpSession, shouldRunDebateExtraction } from "../lib/rfpFlow";
-import { createRfpSession, fetchRfpCards, waitForRfpCards } from "../lib/rfpApi";
+import { createRfpSession, fetchRfpCards, renderClientProposal, userMessageConfirmsBooking, waitForRfpCards } from "../lib/rfpApi";
+import ClientMiniVoiceOrb from "../components/composer/ClientMiniVoiceOrb";
 import { streamAssistantReply } from "../lib/voiceChatStream";
+import { sanitizeClientMessage } from "../lib/sanitizeClientMessage";
+import { useAppShell } from "../context/AppShellContext";
 
 function newCaptionId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
 export default function ClientWorkspace() {
+  const { clientSubtitlesEnabled, setClientProposalFullscreen } = useAppShell();
   const [composerOpen, setComposerOpen] = useState(true);
+  const [proposalPresentation, setProposalPresentation] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const sessionIdRef = useRef<string | null>(null);
@@ -189,8 +194,20 @@ export default function ClientWorkspace() {
     [appendCaption, speakOnce],
   );
 
-  const { cards, proposalHtml, debateRings, error, submitCardMutation, markCardSaving, clientSession, cardSaveState, cardValidationError, setCards } =
+  const { cards, proposalHtml, debateRings, error, submitCardMutation, markCardSaving, clientSession, cardSaveState, cardValidationError, setCards, clearProposalHtml, setProposalHtml } =
     useBidirectionalAgentUI(sessionId, handleAgentUtterance);
+
+  useEffect(() => {
+    if (proposalHtml) {
+      setProposalPresentation(true);
+      setComposerOpen(true);
+    }
+  }, [proposalHtml]);
+
+  useEffect(() => {
+    setClientProposalFullscreen(proposalPresentation);
+    return () => setClientProposalFullscreen(false);
+  }, [proposalPresentation, setClientProposalFullscreen]);
 
   const ensureSession = useCallback(
     async (
@@ -247,6 +264,8 @@ export default function ClientWorkspace() {
 
   const askAssistant = useCallback(
     async (userMessage: string, opts?: { skipUserCaption?: boolean }) => {
+      userMessage = sanitizeClientMessage(userMessage);
+      if (!userMessage) return;
       if (!opts?.skipUserCaption) {
         appendCaption("user", userMessage);
       }
@@ -326,6 +345,13 @@ export default function ClientWorkspace() {
         if (sid) {
           const fresh = await fetchRfpCards(sid);
           if (cardsHaveIdentifiedFields(fresh)) setCards(fresh);
+          if (userMessageConfirmsBooking(userMessage)) {
+            const html = await renderClientProposal(sid);
+            if (html) {
+              setProposalHtml(html);
+              setProposalPresentation(true);
+            }
+          }
         }
       } finally {
         setThinking(false);
@@ -428,10 +454,12 @@ export default function ClientWorkspace() {
 
   const onComposerSend = useCallback(
     (text: string) => {
+      const cleaned = sanitizeClientMessage(text);
+      if (!cleaned) return;
       primeAudioSync();
       void unlockBrowserAudio().then(async () => {
         synthesizePulse();
-        await askAssistant(text);
+        await askAssistant(cleaned);
       });
     },
     [askAssistant, synthesizePulse],
@@ -442,9 +470,17 @@ export default function ClientWorkspace() {
     cards,
     agentUiComponent,
   );
+  const showSummaryDeck = showCardDeck && !proposalPresentation;
+
+  const exitProposalView = useCallback(() => {
+    setProposalPresentation(false);
+    clearProposalHtml();
+    setComposerOpen(true);
+  }, [clearProposalHtml]);
 
   const subtitleBandActive =
-    captions.length > 0 || thinking || agentSpeaking || progressText != null;
+    clientSubtitlesEnabled &&
+    (captions.length > 0 || thinking || agentSpeaking || progressText != null);
 
   const enableVoice = useCallback(async () => {
     await unlockBrowserAudio();
@@ -461,11 +497,15 @@ export default function ClientWorkspace() {
 
   return (
     <div
-      className="relative isolate h-full min-h-0 overflow-y-auto"
+      className={`relative isolate h-full min-h-0 ${proposalPresentation ? "overflow-hidden" : "overflow-y-auto"}`}
       onDragEnter={() => setDragging(true)}
       onDragLeave={() => setDragging(false)}
     >
-      <ParticleConstellation />
+      {!proposalPresentation && <ParticleConstellation />}
+      {proposalPresentation && proposalHtml ? (
+        <ProposalTemplateRenderer html={proposalHtml} variant="background" />
+      ) : (
+        <>
       <div className="relative z-10 flex min-h-full">
         <main
           className={`flex-1 flex flex-col items-center justify-center min-h-[calc(100vh-6rem)] w-full transition-[padding] duration-300 ${
@@ -504,7 +544,7 @@ export default function ClientWorkspace() {
           )}
         </main>
       </div>
-      {showCardDeck && (
+      {showSummaryDeck && (
         <AgentCardDeck
           cards={cards}
           clientSession={clientSession}
@@ -531,18 +571,26 @@ export default function ClientWorkspace() {
           }}
         />
       ) : null}
+        </>
+      )}
       <div
-        className={`fixed inset-x-0 z-40 flex flex-col items-center pointer-events-none px-4 ${
-          composerOpen ? "bottom-[7.25rem]" : "bottom-14"
+        className={`fixed inset-x-0 z-40 flex flex-col items-center px-4 pointer-events-none ${
+          proposalPresentation ? "bottom-[5.5rem]" : composerOpen ? "bottom-[7.25rem]" : "bottom-14"
         }`}
       >
-        <div className="pointer-events-auto w-full max-w-xl flex flex-col items-center gap-2">
-          <VoiceAgentSubtitles
-            lines={captions}
-            agentSpeaking={agentSpeaking}
-            thinking={thinking}
-            progressText={progressText}
-          />
+        <div
+          className={`w-full max-w-xl flex flex-col items-center gap-2 ${
+            proposalPresentation ? "pointer-events-none" : "pointer-events-auto"
+          }`}
+        >
+          {clientSubtitlesEnabled ? (
+            <VoiceAgentSubtitles
+              lines={captions}
+              agentSpeaking={agentSpeaking}
+              thinking={thinking}
+              progressText={progressText}
+            />
+          ) : null}
           <p className="text-xs text-center max-w-md">
             {isMicLive ? (
               <span className="client-voice-status client-voice-status--active font-medium">● Listening · local ASR</span>
@@ -555,7 +603,9 @@ export default function ClientWorkspace() {
             ) : agentSpeaking ? (
               <span className="client-voice-status client-voice-status--speaking animate-pulse font-medium">● Speaking</span>
             ) : (
-              <span className="client-hint-muted">Tap the orb for voice · Whisper</span>
+              <span className="client-hint-muted">
+                {proposalPresentation ? "Proposal view · chat below" : "Tap the orb for voice · Whisper"}
+              </span>
             )}
           </p>
           {statusHint && !agentSpeaking && (
@@ -569,9 +619,21 @@ export default function ClientWorkspace() {
         onToggle={() => setComposerOpen((v) => !v)}
         onSend={(text) => void onComposerSend(text)}
         onUpload={uploadFiles}
+        proposalMode={proposalPresentation}
+        onBackFromProposal={exitProposalView}
+        leadingSlot={
+          proposalPresentation ? (
+            <ClientMiniVoiceOrb
+              agentSpeaking={agentSpeaking}
+              thinking={thinking}
+              voiceMode={voiceMode}
+              micLive={isMicLive}
+              onVoiceToggle={toggleVoiceMode}
+            />
+          ) : undefined
+        }
       />
       <WindowDragAndDropOverlay visible={dragging} onDrop={uploadFiles} />
-      {proposalHtml && <ProposalTemplateRenderer html={proposalHtml} />}
     </div>
   );
 }

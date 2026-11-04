@@ -12,7 +12,7 @@ from apps.inventory.room_availability import (
 from apps.rfp_debate.models import RFPSubmission
 
 from .voice_dates import parse_weekday_index
-from .voice_card_updates import VoiceDateValidationError, parse_voice_card_patch
+from .voice_card_updates import VoiceDateValidationError, parse_room_nights_from_block_phrase, parse_voice_card_patch
 from .voice_intake import record_availability_window
 from .client_group_context import (
     message_sets_new_headcount,
@@ -87,6 +87,12 @@ def _apply_planning_patch(rfp: RFPSubmission, message: str) -> dict[str, Any] | 
     if participants and not (patch or {}).get("meeting_space", {}).get("headcount"):
         patch = patch or {}
         patch["meeting_space"] = {"headcount": participants}
+
+    if not (patch or {}).get("room_block", {}).get("total_room_nights"):
+        n = parse_room_nights_from_block_phrase(message)
+        if n and n > 0:
+            patch = patch or {}
+            patch.setdefault("room_block", {})["total_room_nights"] = n
 
     if re.search(r"\bseveral rooms?\b|\bmultiple rooms?\b|\bnot one room\b", lower):
         peak = participants

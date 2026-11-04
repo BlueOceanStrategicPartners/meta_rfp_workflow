@@ -11,6 +11,22 @@ def test_parse_headcount_correction():
     assert patch == {"meeting_space": {"headcount": 20}}
 
 
+def test_parse_catering_and_av_from_voice():
+    msg = "We need continental breakfast and a projector with screen for the meeting."
+    patch = parse_voice_card_patch(msg)
+    assert patch is not None
+    assert "continental breakfast" in (patch.get("catering_av") or {}).get("catering", "").lower()
+    assert (patch.get("catering_av") or {}).get("av")
+    assert (patch.get("meeting_space") or {}).get("av")
+
+
+def test_parse_seating_style_from_voice():
+    patch = parse_voice_card_patch("Please switch meeting seating to theater style for 40 people")
+    assert patch is not None
+    assert (patch.get("meeting_space") or {}).get("seating_style") == "theater"
+    assert (patch.get("meeting_space") or {}).get("headcount") == 40
+
+
 @pytest.mark.django_db
 def test_voice_correction_updates_reply(client_user):
     rfp = RFPSubmission.objects.create(

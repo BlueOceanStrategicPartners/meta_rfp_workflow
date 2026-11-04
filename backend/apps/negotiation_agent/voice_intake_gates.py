@@ -18,12 +18,16 @@ from .client_group_context import (
 from .client_session_memory import build_agent_context_block, normalize_session
 from .voice_card_updates import VoiceDateValidationError, parse_voice_card_patch
 from .voice_dates import (
+    message_mentions_checkin,
+    message_mentions_checkout,
     parse_arrival_date_from_voice,
+    parse_duration_nights_from_voice,
     parse_weekday_index,
     validate_stay_not_in_past,
     voice_today,
     resolve_weekday_in_window,
 )
+from .voice_intake_apply import apply_stay_patch, build_stay_patch_from_dates
 from .voice_prompts import compose_arrival_nights_reply, compose_nights_complete_reply
 from apps.inventory.room_availability import inventory_capacity_warning, inventory_fits_block
 
@@ -209,7 +213,13 @@ def extract_intake_slots(rfp: RFPSubmission, message: str) -> IntakeSlots:
         if ms.get("headcount"):
             slots.headcount = int(ms["headcount"])
 
-    if slots.check_in is None and (
+    if slots.nights is None:
+        dur = parse_duration_nights_from_voice(cleaned)
+        if dur:
+            slots.nights = dur
+
+    checkout_only = message_mentions_checkout(cleaned) and not message_mentions_checkin(cleaned)
+    if slots.check_in is None and not checkout_only and (
         parse_weekday_index(message) is not None or _message_mentions_arrival(message)
     ):
         resolved = parse_arrival_date_from_voice(
@@ -234,6 +244,55 @@ def extract_intake_slots(rfp: RFPSubmission, message: str) -> IntakeSlots:
     return slots
 
 
+def _complete_stay_if_ready(
+    rfp: RFPSubmission,
+    slots: IntakeSlots,
+    session: dict[str, Any],
+    intake: dict[str, Any],
+) -> IntakeGateResult | None:
+    """Apply full stay when patch or slots already have check-in and check-out."""
+    patch = slots.patch or {}
+    ov = patch.get("event_overview") or {}
+    rb = patch.get("room_block") or {}
+
+    check_in = slots.check_in
+    check_out = slots.check_out
+    if check_in is None and ov.get("check_in_date"):
+        try:
+            check_in = date.fromisoformat(str(ov["check_in_date"])[:10])
+        except ValueError:
+            check_in = None
+    if check_out is None and ov.get("check_out_date"):
+        try:
+            check_out = date.fromisoformat(str(ov["check_out_date"])[:10])
+        except ValueError:
+            check_out = None
+    if check_in is None or check_out is None:
+        return None
+
+    nights = slots.nights or rb.get("total_room_nights")
+    if not nights:
+        nights = max(1, (check_out - check_in).days)
+    n = int(nights)
+    peak = slots.peak_rooms or resolve_peak_rooms(rfp, headcount=slots.headcount)
+    hc = slots.headcount or resolve_stored_headcount(rfp)
+    stay_patch = build_stay_patch_from_dates(
+        check_in=check_in,
+        check_out=check_out,
+        headcount=hc,
+        peak_rooms=peak,
+    )
+    apply_stay_patch(rfp, stay_patch)
+    cap = inventory_capacity_warning(check_in, peak or hc or 0) if (peak or hc) else None
+    spoken = compose_nights_complete_reply(
+        arrival_label=_spoken_arrival_label(check_in),
+        nights=n,
+        headcount=hc,
+        inventory_note=cap,
+    )
+    return IntakeGateResult(gate=IntakeGate.NIGHTS_COMPLETION, spoken=spoken, slots=slots)
+
+
 def run_intake_gate_pipeline(rfp: RFPSubmission, message: str) -> IntakeGateResult | str | None:
     """
     Gate-check intake orchestrator.
@@ -251,10 +310,9 @@ def run_intake_gate_pipeline(rfp: RFPSubmission, message: str) -> IntakeGateResu
     session = normalize_session(rfp.client_session_json)
     intake = _intake_block(session)
 
-    if slots.patch and (slots.patch.get("event_overview") or {}).get("check_out_date"):
-        return None
-    if slots.check_in and slots.check_out and slots.nights:
-        return None
+    completed = _complete_stay_if_ready(rfp, slots, session, intake)
+    if completed:
+        return completed
 
     pending_check_in = (intake.get("check_in_iso") or "").strip()
     if pending_check_in and slots.nights and intake.get("pending_field") == "nights":
@@ -294,7 +352,40 @@ def run_intake_gate_pipeline(rfp: RFPSubmission, message: str) -> IntakeGateResu
     if slots.check_in is None:
         return None
     if slots.nights:
-        return None
+        if slots.check_out:
+            completed = _complete_stay_if_ready(rfp, slots, session, intake)
+            if completed:
+                return completed
+        arrival = slots.check_in
+        # Duration already known (e.g. "only one day") — complete stay without re-asking nights.
+        n = int(slots.nights)
+        check_out = arrival + timedelta(days=max(1, n))
+        peak = slots.peak_rooms or resolve_peak_rooms(rfp, headcount=slots.headcount)
+        hc = slots.headcount or resolve_stored_headcount(rfp)
+        full_patch: dict[str, Any] = {
+            "event_overview": {
+                "check_in_date": arrival.isoformat(),
+                "check_out_date": check_out.isoformat(),
+            },
+            "room_block": {"total_room_nights": n},
+        }
+        if hc:
+            full_patch["meeting_space"] = {"headcount": hc}
+            if peak:
+                full_patch["room_block"]["peak_rooms"] = peak
+        _apply_patch(rfp, full_patch)
+        intake["pending_field"] = ""
+        intake["check_in_iso"] = arrival.isoformat()
+        session["intake"] = intake
+        rfp.client_session_json = session
+        cap = inventory_capacity_warning(arrival, peak or hc or 0) if (peak or hc) else None
+        spoken = compose_nights_complete_reply(
+            arrival_label=_spoken_arrival_label(arrival),
+            nights=n,
+            headcount=hc,
+            inventory_note=cap,
+        )
+        return IntakeGateResult(gate=IntakeGate.NIGHTS_COMPLETION, spoken=spoken, slots=slots)
 
     err = validate_stay_not_in_past(slots.check_in, slots.check_in)
     if err:

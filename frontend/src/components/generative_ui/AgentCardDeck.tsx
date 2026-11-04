@@ -222,12 +222,12 @@ export default function AgentCardDeck({
       </SideCard>
 
       <SideCard title="Catering & AV" delay={0.2}>
-        <Field
+        <TextAreaField
           label="Catering notes"
           value={form.cateringNotes}
           onChange={(v) => updateField("cateringNotes", v)}
         />
-        <Field
+        <TextAreaField
           label="AV specs"
           value={form.avSpecs}
           onChange={(v) => updateField("avSpecs", v)}
@@ -293,6 +293,30 @@ function SideCard({
       <h3 className="client-side-card__title mb-2 text-sm font-medium">{title}</h3>
       {children}
     </motion.div>
+  );
+}
+
+function TextAreaField({
+  label,
+  value,
+  onChange,
+  className = "",
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  className?: string;
+}) {
+  return (
+    <label className={`client-side-field block ${className}`}>
+      <span className="client-side-field-label">{label}</span>
+      <textarea
+        rows={3}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="client-side-input client-side-textarea mt-1 w-full min-h-[4.5rem] resize-y"
+      />
+    </label>
   );
 }
 

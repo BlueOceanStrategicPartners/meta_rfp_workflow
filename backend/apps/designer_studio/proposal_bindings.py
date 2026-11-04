@@ -292,11 +292,12 @@ def build_binding_payloads_from_cards(
 
     meeting_specs = seed["meeting_space_specs"]
     if meeting:
+        catering_av = cards.get("catering_av") or {}
         meeting_specs = {
             "name": meeting.get("name") or meeting_specs.get("name"),
             "seating_style": meeting.get("seating_style"),
             "headcount": meeting.get("headcount"),
-            "av": meeting.get("av"),
+            "av": meeting.get("av") or catering_av.get("av"),
         }
 
     xgboost = seed["xgboost_quote_breakdown"]
