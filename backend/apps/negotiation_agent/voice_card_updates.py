@@ -113,7 +113,71 @@ def _peak_rooms_from_message(lower: str) -> int | None:
     return None
 
 
+_SEATING_HEADCOUNT_RE = (
+    r"classroom|theater|theatre|banquet|u-?shape|boardroom|cabaret|"
+    r"hollow\s+square"
+)
+
+
+def _asr_correct_block_headcount(n: int, lower: str) -> int:
+    """Speech often prepends '4' on 'for 85' (e.g. 'block 485 attend')."""
+    if n < 200 or not re.search(r"\broom\s+(?:block|lock)\b|\bblock\s+\d+\s+attend", lower):
+        return n
+    s = str(n)
+    if len(s) >= 3 and s.endswith("85"):
+        candidate = int(s[-2:]) if len(s) == 3 else int(s[1:])
+        if 10 <= candidate <= 180:
+            return candidate
+    return n
+
+
+def _headcount_beside_seating_or_block(lower: str) -> int | None:
+    """ASR often says '85 in classroom setup' without 'guests' or 'participants'."""
+    m = re.search(r"\b(\d+)\s+attend(?:ance|ees?|ing)?\b", lower)
+    if m:
+        return _asr_correct_block_headcount(int(m.group(1)), lower)
+    m = re.search(r"\broom\s+(?:block|lock)\s+(?:for\s+)?(\d+)\b", lower)
+    if m:
+        return _asr_correct_block_headcount(int(m.group(1)), lower)
+    m = re.search(
+        rf"\b(?:about|around|roughly|approximately)?\s*(\d+)\s+in\s+(?:{_SEATING_HEADCOUNT_RE})\b",
+        lower,
+    )
+    if m:
+        return _asr_correct_block_headcount(int(m.group(1)), lower)
+    m = re.search(rf"\b(\d+)\s+in\s+(?:{_SEATING_HEADCOUNT_RE})\b", lower)
+    if m:
+        return _asr_correct_block_headcount(int(m.group(1)), lower)
+    m = re.search(r"\broom\s+(?:block|lock)\s+for\s+(\d+)\b", lower)
+    if m:
+        return _asr_correct_block_headcount(int(m.group(1)), lower)
+    if re.search(r"\b(?:room\s+)?(?:block|lock)\s+for\b", lower):
+        m = re.search(r"\b(?:block|lock)\s+for\s+(\d+)\b", lower)
+        if m:
+            return int(m.group(1))
+    if re.search(r"\bmeeting\s+space\b|\bme\s+in\s+space\b", lower):
+        nums = _numbers_in_text(lower)
+        years = {int(y) for y in re.findall(r"\b(?:19|20)\d{2}\b", lower)}
+        dayish = {int(d) for d in re.findall(r"\b(?:june|july|august|january|february|march|april|may|"
+                                              r"september|october|november|december)\s+(\d{1,2})\b", lower)}
+        nums = [n for n in nums if n not in years and n not in dayish and n >= 10]
+        if nums:
+            return max(nums)
+    return None
+
+
+def group_size_from_voice_message(message: str) -> int | None:
+    """Public helper — parse headcount / block size from a spoken or typed client line."""
+    lower = (message or "").lower().strip()
+    if not lower:
+        return None
+    return _group_size_from_message(lower)
+
+
 def _group_size_from_message(lower: str) -> int | None:
+    beside = _headcount_beside_seating_or_block(lower)
+    if beside and beside > 0:
+        return beside
     if re.search(r"\b(a|one)\s+hundred\s+(gates|guests|people|attendees|pax|participants?)\b", lower):
         return 100
     if re.search(r"\bhundred\s+(gates|guests|people|attendees|pax|participants?)\b", lower):
@@ -340,13 +404,12 @@ def parse_voice_card_patch(
     headcount = _group_size_from_message(lower)
     if headcount and headcount > 0:
         if needs_meeting_space:
-            patch["meeting_space"] = {"headcount": headcount, "included": True}
-        if peak is None and re.search(
-            r"\b(one|solo|single|solar)\s+room\b|\bper\s+guest\b|\bper\s+person\b|one participant needs one room|each one",
-            lower,
+            patch.setdefault("meeting_space", {})["headcount"] = headcount
+            patch["meeting_space"]["included"] = True
+        if peak is None and (
+            not needs_meeting_space
+            or re.search(r"\broom\s+(?:block|lock)\b|\b(\d+)\s+attend", lower)
         ):
-            patch.setdefault("room_block", {})["peak_rooms"] = headcount
-        elif not needs_meeting_space and peak is None:
             patch.setdefault("room_block", {})["peak_rooms"] = headcount
 
     if re.search(r"\bnights?\b", lower):
@@ -385,8 +448,10 @@ def apply_voice_message_to_cards(session_id: str, message: str) -> dict | None:
     """Persist voice corrections and re-price. Returns patch applied or None."""
     from apps.rfp_debate.models import RFPSubmission
 
+    from .client_group_context import ensure_group_size_on_cards
     from .meeting_space_intent import meeting_space_wanted
 
+    rfp: RFPSubmission | None = None
     try:
         rfp = RFPSubmission.objects.get(pk=session_id)
         patch = parse_voice_card_patch(message, needs_meeting_space=meeting_space_wanted(rfp))
@@ -395,8 +460,19 @@ def apply_voice_message_to_cards(session_id: str, message: str) -> dict | None:
     except VoiceDateValidationError:
         raise
     if not patch:
-        return None
+        hc = group_size_from_voice_message(message)
+        if hc:
+            patch = {
+                "meeting_space": {"headcount": hc, "included": True},
+                "room_block": {"peak_rooms": hc},
+            }
+        else:
+            if rfp is not None:
+                ensure_group_size_on_cards(rfp)
+            return None
     from apps.ui_card_validator.services import validate_card_mutation
 
     validate_card_mutation(session_id, patch)
+    if rfp is not None:
+        ensure_group_size_on_cards(rfp)
     return patch

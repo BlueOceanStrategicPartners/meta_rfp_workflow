@@ -104,7 +104,16 @@ async function fetchBlockingAssistantReply(
       body: JSON.stringify({ message, rfp_id: rfpId }),
     });
     if (!res.ok) {
-      const fallback = "I'm having trouble reaching the assistant. Please try again in a moment.";
+      let detail = "";
+      try {
+        const body = (await res.json()) as { detail?: string; message?: string };
+        detail = String(body.detail || body.message || "").trim();
+      } catch {
+        /* ignore */
+      }
+      const fallback = detail
+        ? detail
+        : `I'm having trouble reaching the assistant (HTTP ${res.status}). Check that the backend is running on port 8000.`;
       handlers.onError?.(fallback);
       return { reply: fallback, uiComponent: null };
     }

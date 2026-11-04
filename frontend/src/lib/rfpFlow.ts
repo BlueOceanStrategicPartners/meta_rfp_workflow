@@ -127,7 +127,35 @@ export function cardsHaveIdentifiedFields(cards: Record<string, unknown>): boole
   const headcount = Number(meeting.headcount);
   if (headcount > 0) return true;
   if (quote.anchor_price != null && quote.anchor_price !== "") return true;
+  if (String(meeting.seating_style || "").trim()) return true;
   return false;
+}
+
+/** Merge WebSocket / poll payloads into existing card state. */
+export function mergeClientCardRecords(
+  prev: Record<string, unknown>,
+  next: Record<string, unknown>,
+): Record<string, unknown> {
+  if (!next || !Object.keys(next).length) return prev;
+  const out: Record<string, unknown> = { ...prev };
+  for (const [key, val] of Object.entries(next)) {
+    if (val && typeof val === "object" && !Array.isArray(val)) {
+      const prevSection = out[key];
+      if (prevSection && typeof prevSection === "object" && !Array.isArray(prevSection)) {
+        out[key] = { ...(prevSection as Record<string, unknown>), ...(val as Record<string, unknown>) };
+      } else {
+        out[key] = val;
+      }
+    } else {
+      out[key] = val;
+    }
+  }
+  return out;
+}
+
+/** Side summary deck — session plus any extracted or in-progress card data. */
+export function cardsReadyForSummaryDeck(cards: Record<string, unknown>): boolean {
+  return cardsHaveIdentifiedFields(cards);
 }
 
 /** Room-only stay — hide meeting / catering cards and proposal meeting bindings. */

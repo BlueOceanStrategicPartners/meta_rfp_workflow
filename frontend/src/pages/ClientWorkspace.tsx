@@ -16,7 +16,7 @@ import { useBidirectionalAgentUI } from "../hooks/useBidirectionalAgentUI";
 import { unlockBrowserAudio, primeAudioSync, useSeamlessM4TV2 } from "../hooks/useSeamlessM4TV2";
 import type { AgentUiComponent } from "../lib/agentUiComponents";
 import { useClientCardDeckVisibility } from "../hooks/useClientCardDeckVisibility";
-import { cardsHaveIdentifiedFields, messageIsSocialGreeting, quickVoiceAck, shouldEnsureRfpSession, shouldRunDebateExtraction } from "../lib/rfpFlow";
+import { cardsHaveIdentifiedFields, mergeClientCardRecords, messageIsSocialGreeting, quickVoiceAck, shouldEnsureRfpSession, shouldRunDebateExtraction } from "../lib/rfpFlow";
 import { createRfpSession, fetchRfpCards, renderClientProposal, userMessageConfirmsBooking, waitForRfpCards } from "../lib/rfpApi";
 import { streamAssistantReply } from "../lib/voiceChatStream";
 import { sanitizeClientMessage } from "../lib/sanitizeClientMessage";
@@ -47,6 +47,9 @@ export default function ClientWorkspace() {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const sessionIdRef = useRef<string | null>(null);
   sessionIdRef.current = sessionId;
+  const sessionSummariesRef = useRef<ClientRfpSessionSummary[]>([]);
+  /** After "+ New session", do not auto-attach an existing RFP (would reopen proposal cards). */
+  const preferBlankSessionRef = useRef(false);
   const [agentSpeaking, setAgentSpeaking] = useState(false);
   const [voiceBlocked, setVoiceBlocked] = useState(false);
   const [statusHint, setStatusHint] = useState<string | null>(null);
@@ -67,6 +70,8 @@ export default function ClientWorkspace() {
   const [voiceMode, setVoiceMode] = useState(false);
   const voiceModeRef = useRef(false);
   voiceModeRef.current = voiceMode;
+  const agentSpeakingRef = useRef(false);
+  agentSpeakingRef.current = agentSpeaking;
   const { synthesizePulse } = useVoiceOrbAudio(false);
 
   const appendCaption = useCallback((role: CaptionLine["role"], text: string, status: CaptionLine["status"] = "done") => {
@@ -120,7 +125,12 @@ export default function ClientWorkspace() {
   const speakOnce = useCallback(
     async (text: string, captionId?: string, opts?: { mandatory?: boolean }) => {
       const normalized = text.trim();
-      if (!normalized) return;
+      if (!normalized) {
+        if (voiceModeRef.current) {
+          void resumeListeningRef.current();
+        }
+        return;
+      }
 
       pauseListeningRef.current();
 
@@ -228,7 +238,9 @@ export default function ClientWorkspace() {
     if (!authed) return;
     setSessionsLoading(true);
     try {
-      setSessionSummaries(await listClientRfpSessions());
+      const list = await listClientRfpSessions();
+      setSessionSummaries(list);
+      sessionSummariesRef.current = list;
     } finally {
       setSessionsLoading(false);
     }
@@ -238,12 +250,17 @@ export default function ClientWorkspace() {
     void refreshSessions();
   }, [refreshSessions]);
 
+  const bindSession = useCallback((id: string) => {
+    preferBlankSessionRef.current = false;
+    sessionIdRef.current = id;
+    setSessionId(id);
+  }, []);
+
   const activateSession = useCallback(
     async (id: string) => {
       const detail = await fetchClientRfpSession(id);
       if (!detail) return;
-      setSessionId(id);
-      sessionIdRef.current = id;
+      bindSession(id);
       setSessionCompleted(detail.completed);
       setCards(detail.active_ui_cards_json || {});
       hydrateSession({ active_ui_cards_json: detail.active_ui_cards_json, client_session_json: detail.client_session });
@@ -261,7 +278,25 @@ export default function ClientWorkspace() {
         clearProposalHtml();
       }
     },
-    [clearProposalHtml, hydrateSession, setCards, setProposalHtml],
+    [bindSession, clearProposalHtml, hydrateSession, setCards, setProposalHtml],
+  );
+
+  useEffect(() => {
+    if (sessionId || sessionsLoading || sessionSummaries.length === 0) return;
+    if (preferBlankSessionRef.current) return;
+    const actives = sessionSummaries.filter((s) => !s.archived);
+    if (actives.length !== 1) return;
+    void activateSession(actives[0].id);
+  }, [sessionId, sessionsLoading, sessionSummaries, activateSession]);
+
+  const refreshCardsFromServer = useCallback(
+    async (sid: string) => {
+      const fresh = await waitForRfpCards(sid, { attempts: 12, delayMs: 400 });
+      if (Object.keys(fresh).length) {
+        setCards((prev) => mergeClientCardRecords(prev, fresh));
+      }
+    },
+    [setCards],
   );
 
   const openProposalView = useCallback(async () => {
@@ -292,8 +327,7 @@ export default function ClientWorkspace() {
       onProgress?.("Creating your draft and running venue analysis…");
       const created = await createRfpSession(userMessage, runDebate);
       if (!created.ok) return { error: created.message };
-      setSessionId(created.id);
-      sessionIdRef.current = created.id;
+      bindSession(created.id);
       setSessionCompleted(false);
       void refreshSessions();
       if (runDebate) {
@@ -357,6 +391,13 @@ export default function ClientWorkspace() {
       };
 
       try {
+        if (!sessionIdRef.current && !preferBlankSessionRef.current) {
+          const latest = sessionSummariesRef.current.find((s) => !s.archived);
+          if (latest) {
+            await activateSession(latest.id);
+          }
+        }
+
         const startPipeline = shouldRunDebateExtraction(userMessage) && !sessionIdRef.current;
 
         if (startPipeline) {
@@ -378,13 +419,21 @@ export default function ClientWorkspace() {
 
         if (!sessionIdRef.current && shouldEnsureRfpSession(userMessage)) {
           const created = await createRfpSession(userMessage.slice(0, 5000), false);
-          if (created.ok) {
-            setSessionId(created.id);
-            sessionIdRef.current = created.id;
-            setSessionCompleted(false);
-            void refreshSessions();
-            if (cardsHaveIdentifiedFields(created.cards)) setCards(created.cards);
+          if (!created.ok) {
+            setStatusHint(created.message);
+            return;
           }
+          bindSession(created.id);
+          setSessionCompleted(false);
+          void refreshSessions();
+          if (cardsHaveIdentifiedFields(created.cards)) {
+            setCards((prev) => mergeClientCardRecords(prev, created.cards));
+          }
+        }
+
+        if (shouldEnsureRfpSession(userMessage) && !sessionIdRef.current) {
+          setStatusHint("Could not start an RFP session. Check the backend on port 8000 and try again.");
+          return;
         }
 
         const turn = await streamAssistantReply(userMessage, sessionIdRef.current, {
@@ -413,8 +462,7 @@ export default function ClientWorkspace() {
 
         const sid = sessionIdRef.current;
         if (sid) {
-          const fresh = await fetchRfpCards(sid);
-          if (cardsHaveIdentifiedFields(fresh)) setCards(fresh);
+          await refreshCardsFromServer(sid);
           if (userMessageConfirmsBooking(userMessage)) {
             const html = await renderClientProposal(sid);
             if (html) {
@@ -429,9 +477,14 @@ export default function ClientWorkspace() {
       } finally {
         setThinking(false);
         setProgressText(null);
+        if (voiceModeRef.current && !agentSpeakingRef.current) {
+          window.setTimeout(() => {
+            void resumeListeningRef.current();
+          }, 120);
+        }
       }
     },
-    [appendCaption, cards, ensureSession, patchCaption, refreshSessions, speakOnce],
+    [activateSession, appendCaption, bindSession, cards, ensureSession, patchCaption, refreshCardsFromServer, refreshSessions, speakOnce],
   );
 
   askAssistantRef.current = askAssistant;
@@ -483,6 +536,15 @@ export default function ClientWorkspace() {
     void resumeListening();
   };
 
+  useEffect(() => {
+    if (!voiceMode || thinking || agentSpeaking) return;
+    if (micPhase !== "paused") return;
+    const id = window.setTimeout(() => {
+      void resumeListeningRef.current();
+    }, 250);
+    return () => window.clearTimeout(id);
+  }, [voiceMode, thinking, agentSpeaking, micPhase, resumeListening]);
+
   const toggleVoiceMode = useCallback(() => {
     if (agentSpeaking) return;
     if (voiceMode) {
@@ -504,8 +566,7 @@ export default function ClientWorkspace() {
       appendCaption("user", text?.slice(0, 200) || "Uploaded RFP document");
       const created = await createRfpSession(text || "Corporate RFP", true);
       if (created.ok) {
-        setSessionId(created.id);
-        sessionIdRef.current = created.id;
+        bindSession(created.id);
         setSessionCompleted(false);
         void refreshSessions();
         const deck = cardsHaveIdentifiedFields(created.cards)
@@ -524,7 +585,7 @@ export default function ClientWorkspace() {
         setStatusHint(created.message);
       }
     },
-    [appendCaption, refreshSessions, setCards, speakOnce, synthesizePulse],
+    [appendCaption, bindSession, refreshSessions, setCards, speakOnce, synthesizePulse],
   );
 
   const onComposerSend = useCallback(
@@ -554,6 +615,7 @@ export default function ClientWorkspace() {
   }, [clearProposalHtml]);
 
   const startNewSession = useCallback(() => {
+    preferBlankSessionRef.current = true;
     setSessionId(null);
     sessionIdRef.current = null;
     setSessionCompleted(false);
@@ -739,7 +801,6 @@ export default function ClientWorkspace() {
           sessions={sessionSummaries}
           activeSessionId={sessionId}
           loading={sessionsLoading}
-          composerOpen={composerOpen}
           archiveBusyId={archiveBusyId}
           onSelect={(id) => void activateSession(id)}
           onArchive={handleArchiveSession}

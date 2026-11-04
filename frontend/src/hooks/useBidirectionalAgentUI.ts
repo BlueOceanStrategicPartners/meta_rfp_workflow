@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { cardsHaveIdentifiedFields } from "../lib/rfpFlow";
+import { mergeClientCardRecords } from "../lib/rfpFlow";
 import type { ClientSessionState } from "../lib/clientSession";
 import type { CardSaveState } from "./useDebouncedCardPatch";
 import { primeSessionProposalPreviewCache } from "../components/client/ClientSessionProposalPreview";
@@ -41,18 +41,16 @@ export function useBidirectionalAgentUI(
       if (msg.type === "session_snapshot") {
         const payload = msg.payload || {};
         const next = (payload.cards as Record<string, unknown>) || {};
-        if (cardsHaveIdentifiedFields(next)) {
-          setCards(next);
+        if (Object.keys(next).length) {
+          setCards((prev) => mergeClientCardRecords(prev, next));
         }
         const session = payload.client_session as ClientSessionState | undefined;
         if (session) setClientSession(session);
       }
       if (msg.type === "cards_patch") {
         const next = (msg.payload?.cards as Record<string, unknown>) || {};
-        if (cardsHaveIdentifiedFields(next)) {
-          setCards(next);
-        } else if (Object.keys(next).length) {
-          setCards((prev) => (cardsHaveIdentifiedFields(prev) ? prev : next));
+        if (Object.keys(next).length) {
+          setCards((prev) => mergeClientCardRecords(prev, next));
         }
         setCardValidationError(null);
         setCardSaveState("saved");
@@ -135,7 +133,8 @@ export function useBidirectionalAgentUI(
 
   const hydrateSession = useCallback((payload: Record<string, unknown>) => {
     if (payload.active_ui_cards_json) {
-      setCards(payload.active_ui_cards_json as Record<string, unknown>);
+      const next = payload.active_ui_cards_json as Record<string, unknown>;
+      setCards((prev) => mergeClientCardRecords(prev, next));
     }
     if (payload.client_session_json && typeof payload.client_session_json === "object") {
       setClientSession(payload.client_session_json as ClientSessionState);

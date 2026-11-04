@@ -40,10 +40,11 @@ function streamApiProxy(target: string): ProxyOptions {
 
 export default defineConfig({
   plugins: [react()],
-  server: {
+    server: {
     port: 5173,
     proxy: {
       "/api/designer/chat/stream": streamApiProxy("http://127.0.0.1:8000"),
+      "/api/negotiation/voice-chat/stream": streamApiProxy("http://127.0.0.1:8000"),
       "/api": devApiProxy("http://127.0.0.1:8000"),
       "/media": devApiProxy("http://127.0.0.1:8000"),
       "/ws": { target: "ws://127.0.0.1:8000", ws: true },

@@ -158,6 +158,11 @@ def build_autonomous_voice_intro(rfp: RFPSubmission, *, partial: bool = False) -
         detail_bits.insert(0, event_type)
 
     dates = _date_phrase(overview.get("check_in_date"), overview.get("check_out_date"))
+    cin = (overview.get("check_in_date") or "").strip()
+    cout = (overview.get("check_out_date") or "").strip()
+    has_dates = bool(dates) or (
+        cin and cin.upper() != "TBD" and cout and cout.upper() != "TBD" and cout != cin
+    )
     if dates:
         detail_bits.append(dates)
     if headcount_n > 0:
@@ -170,9 +175,9 @@ def build_autonomous_voice_intro(rfp: RFPSubmission, *, partial: bool = False) -
     if rate:
         parts.append(f"Your preliminary package estimate is {rate} — see the quote card for details.")
 
-    if not dates or headcount_n <= 0:
+    if not has_dates or headcount_n <= 0:
         missing: list[str] = []
-        if not dates:
+        if not has_dates:
             missing.append("travel dates")
         if headcount_n <= 0:
             missing.append("group size")

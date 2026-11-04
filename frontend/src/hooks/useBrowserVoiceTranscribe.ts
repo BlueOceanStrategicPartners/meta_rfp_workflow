@@ -28,6 +28,7 @@ export function useBrowserVoiceTranscribe(options: Options) {
   optsRef.current = options;
 
   const recognitionRef = useRef<BrowserSpeechRecognition | null>(null);
+  const recognitionGenerationRef = useRef(0);
   const listeningRef = useRef(false);
   const pausedRef = useRef(false);
   const turnAccumRef = useRef("");
@@ -116,12 +117,14 @@ export function useBrowserVoiceTranscribe(options: Options) {
     }
 
     stopRecognition();
+    const generation = ++recognitionGenerationRef.current;
     const rec = new Ctor();
     rec.continuous = true;
     rec.interimResults = true;
     rec.lang = "en-US";
 
     rec.onstart = () => {
+      if (recognitionGenerationRef.current !== generation) return;
       if (!listeningRef.current || pausedRef.current) return;
       setState("listening");
       setMicPhase("live");
@@ -129,6 +132,7 @@ export function useBrowserVoiceTranscribe(options: Options) {
     };
 
     rec.onresult = (ev) => {
+      if (recognitionGenerationRef.current !== generation) return;
       if (!listeningRef.current || pausedRef.current) return;
       clearTurnCommitTimer();
       interimRef.current = "";
@@ -144,6 +148,7 @@ export function useBrowserVoiceTranscribe(options: Options) {
     };
 
     rec.onerror = (ev) => {
+      if (recognitionGenerationRef.current !== generation) return;
       if (ev.error === "aborted" || ev.error === "no-speech") return;
       if (ev.error === "not-allowed") {
         optsRef.current.onError?.("Microphone access was denied.");
@@ -160,10 +165,12 @@ export function useBrowserVoiceTranscribe(options: Options) {
     };
 
     rec.onend = () => {
+      if (recognitionGenerationRef.current !== generation) return;
       if (!listeningRef.current || pausedRef.current) return;
       try {
         rec.start();
       } catch {
+        if (recognitionGenerationRef.current !== generation) return;
         attachRecognition();
       }
     };
@@ -185,6 +192,7 @@ export function useBrowserVoiceTranscribe(options: Options) {
   ]);
 
   const stopListening = useCallback(() => {
+    recognitionGenerationRef.current += 1;
     listeningRef.current = false;
     pausedRef.current = false;
     clearTurnCommitTimer();
@@ -197,6 +205,7 @@ export function useBrowserVoiceTranscribe(options: Options) {
   }, [clearTurnCommitTimer, stopLevelsAnimation, stopRecognition]);
 
   const pauseListening = useCallback(() => {
+    recognitionGenerationRef.current += 1;
     pausedRef.current = true;
     clearTurnCommitTimer();
     interimRef.current = "";
@@ -228,15 +237,30 @@ export function useBrowserVoiceTranscribe(options: Options) {
     if (!listeningRef.current) {
       return startListening();
     }
+    if (!pausedRef.current && recognitionRef.current) {
+      return;
+    }
     pausedRef.current = false;
     setState("connecting");
     setMicPhase("connecting");
-    const ok = attachRecognition();
+    await new Promise<void>((resolve) => {
+      window.setTimeout(resolve, 150);
+    });
+    if (!listeningRef.current || pausedRef.current) return;
+    let ok = attachRecognition();
     if (!ok) {
-      stopListening();
-      optsRef.current.onMicStopped?.();
+      await new Promise<void>((resolve) => {
+        window.setTimeout(resolve, 300);
+      });
+      if (!listeningRef.current || pausedRef.current) return;
+      ok = attachRecognition();
     }
-  }, [attachRecognition, startListening, stopListening]);
+    if (!ok) {
+      setState("listening");
+      setMicPhase("paused");
+      optsRef.current.onError?.("Could not restart the microphone. Tap the orb to turn voice off and on.");
+    }
+  }, [attachRecognition, startListening]);
 
   useEffect(() => () => stopListening(), [stopListening]);
 

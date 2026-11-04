@@ -141,7 +141,7 @@ META_MODEL_API_KEY = os.getenv("META_MODEL_API_KEY") or os.getenv("LLM_API_KEY",
 META_MODEL_API_BASE = os.getenv("META_MODEL_API_BASE", "https://api.meta.ai/v1")
 META_MODEL_SPARK = os.getenv("META_MODEL_SPARK", "muse-spark-1.3")
 # Client RFP assistant: Muse Spark (fast). Override model id or use contributor tier via env.
-META_MODEL_CLIENT_ASSISTANT = os.getenv("META_MODEL_CLIENT_ASSISTANT", "muse-spark-1.3")
+META_MODEL_CLIENT_ASSISTANT = os.getenv("META_MODEL_CLIENT_ASSISTANT", "muse-spark-1.3-contributor")
 META_MODEL_CLIENT_ASSISTANT_REASONING_EFFORT = os.getenv(
     "META_MODEL_CLIENT_ASSISTANT_REASONING_EFFORT", "low"
 )

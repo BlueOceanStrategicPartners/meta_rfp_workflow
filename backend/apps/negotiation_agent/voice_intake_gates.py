@@ -27,7 +27,11 @@ from .voice_dates import (
     voice_today,
     resolve_weekday_in_window,
 )
-from .voice_intake_apply import apply_stay_patch, build_stay_patch_from_dates
+from .voice_intake_apply import (
+    apply_stay_patch,
+    build_stay_patch_from_dates,
+    merge_stay_patch_with_voice_extras,
+)
 from .voice_prompts import compose_arrival_nights_reply, compose_nights_complete_reply
 from apps.inventory.room_availability import inventory_capacity_warning, inventory_fits_block
 
@@ -282,7 +286,19 @@ def _complete_stay_if_ready(
         headcount=hc,
         peak_rooms=peak,
     )
+    stay_patch = merge_stay_patch_with_voice_extras(stay_patch, slots.patch)
+    try:
+        merged_hc = int((stay_patch.get("meeting_space") or {}).get("headcount") or 0)
+        if merged_hc > 0:
+            hc = merged_hc
+    except (TypeError, ValueError):
+        pass
+    if hc and hc > 0:
+        persist_group_size_to_intake(rfp, headcount=hc, peak_rooms=peak or hc)
     apply_stay_patch(rfp, stay_patch)
+    from apps.negotiation_agent.client_group_context import ensure_group_size_on_cards
+
+    ensure_group_size_on_cards(rfp)
     cap = inventory_capacity_warning(check_in, peak or hc or 0) if (peak or hc) else None
     spoken = compose_nights_complete_reply(
         arrival_label=_spoken_arrival_label(check_in),
@@ -336,6 +352,15 @@ def run_intake_gate_pipeline(rfp: RFPSubmission, message: str) -> IntakeGateResu
                 full_patch["meeting_space"] = {"headcount": hc}
                 if peak:
                     full_patch["room_block"]["peak_rooms"] = peak
+            full_patch = merge_stay_patch_with_voice_extras(full_patch, slots.patch)
+            try:
+                merged_hc = int((full_patch.get("meeting_space") or {}).get("headcount") or 0)
+                if merged_hc > 0:
+                    hc = merged_hc
+            except (TypeError, ValueError):
+                pass
+            if hc and hc > 0:
+                persist_group_size_to_intake(rfp, headcount=hc, peak_rooms=peak or hc)
             _apply_patch(rfp, full_patch)
             intake["pending_field"] = ""
             session["intake"] = intake
@@ -373,6 +398,15 @@ def run_intake_gate_pipeline(rfp: RFPSubmission, message: str) -> IntakeGateResu
             full_patch["meeting_space"] = {"headcount": hc}
             if peak:
                 full_patch["room_block"]["peak_rooms"] = peak
+        full_patch = merge_stay_patch_with_voice_extras(full_patch, slots.patch)
+        try:
+            merged_hc = int((full_patch.get("meeting_space") or {}).get("headcount") or 0)
+            if merged_hc > 0:
+                hc = merged_hc
+        except (TypeError, ValueError):
+            pass
+        if hc and hc > 0:
+            persist_group_size_to_intake(rfp, headcount=hc, peak_rooms=peak or hc)
         _apply_patch(rfp, full_patch)
         intake["pending_field"] = ""
         intake["check_in_iso"] = arrival.isoformat()

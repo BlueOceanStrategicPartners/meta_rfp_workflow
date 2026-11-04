@@ -10,21 +10,9 @@ from .client_session_memory import normalize_session
 
 
 def participant_count_from_message(message: str) -> int | None:
-    lower = (message or "").lower()
-    m = re.search(r"\b(\d+)\s*participants?\b", lower)
-    if m:
-        return int(m.group(1))
-    m = re.search(
-        r"\b(\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s*"
-        r"(people|peoples|persons|guests|attendees|pax)\b",
-        lower,
-    )
-    if m:
-        try:
-            return int(m.group(1))
-        except ValueError:
-            pass
-    return None
+    from .voice_card_updates import group_size_from_voice_message
+
+    return group_size_from_voice_message(message)
 
 
 def _intake(session: dict[str, Any]) -> dict[str, Any]:
@@ -56,12 +44,11 @@ def resolve_stored_headcount(rfp: RFPSubmission | None) -> int | None:
     for turn in reversed(session.get("transcript") or []):
         if turn.get("role") != "user":
             continue
-        c = participant_count_from_message(str(turn.get("text") or ""))
+        from .voice_card_updates import group_size_from_voice_message
+
+        c = group_size_from_voice_message(str(turn.get("text") or ""))
         if c:
             return c
-        m = re.search(r"\b(\d+)\s*(people|guests|attendees|pax)\b", str(turn.get("text") or "").lower())
-        if m:
-            return int(m.group(1))
     return None
 
 

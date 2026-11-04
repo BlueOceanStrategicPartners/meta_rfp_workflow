@@ -10,6 +10,8 @@
   --client-deck-scroll-track: rgba(30, 41, 59, 0.55);
   --client-deck-scroll-thumb: rgba(148, 163, 184, 0.75);
   --client-deck-scroll-thumb-hover: rgba(34, 211, 238, 0.85);
+  --client-session-rail-fade-top: 5.5rem;
+  --client-session-rail-fade-bottom: 11rem;
   --studio-panel-pad-x: 1.25rem;
   --studio-panel-pad-y: 1rem;
   --studio-safe-bottom: 1.25rem;
@@ -1003,6 +1005,10 @@ body {
     @apply relative min-h-0 flex-1 overflow-hidden;
   }
 
+  .client-side-deck-scroll-shell > .client-custom-scroll {
+    @apply h-full min-h-0;
+  }
+
   .client-session-rail__header {
     margin-bottom: 0.625rem;
   }
@@ -1092,10 +1098,62 @@ body {
   .client-session-rail__scroll {
     overflow: hidden;
     padding-inline: 0.375rem;
+    background: transparent;
+  }
+
+  /* Fade list + scrollbar together — fully transparent at edges (background shows through). */
+  .client-session-rail .client-custom-scroll {
+    -webkit-mask-image: linear-gradient(
+      to bottom,
+      transparent 0,
+      black var(--client-session-rail-fade-top),
+      black calc(100% - var(--client-session-rail-fade-bottom)),
+      transparent 100%
+    );
+    mask-image: linear-gradient(
+      to bottom,
+      transparent 0,
+      black var(--client-session-rail-fade-top),
+      black calc(100% - var(--client-session-rail-fade-bottom)),
+      transparent 100%
+    );
+  }
+
+  .client-session-rail .client-custom-scroll__track {
+    background: linear-gradient(
+      to bottom,
+      transparent 0%,
+      rgb(148 163 184 / 0.14) 22%,
+      rgb(148 163 184 / 0.14) 78%,
+      transparent 100%
+    );
+    -webkit-mask-image: none;
+    mask-image: none;
+    opacity: 0.9;
+  }
+
+  .client-session-rail .client-custom-scroll__thumb {
+    background: linear-gradient(
+      180deg,
+      rgb(34 211 238 / 0.55),
+      rgb(148 163 184 / 0.45)
+    );
+    box-shadow:
+      0 1px 2px rgb(0 0 0 / 0.15),
+      inset 0 1px 0 rgb(255 255 255 / 0.12);
+  }
+
+  .client-session-rail .client-custom-scroll__viewport {
+    -webkit-mask-image: none;
+    mask-image: none;
+  }
+
+  .client-session-rail .client-side-deck-scroll-fade {
+    display: none;
   }
 
   .client-session-rail__scroll-content {
-    padding: 0.375rem 0.5rem 1.25rem;
+    padding: 0.375rem 0.5rem max(7.25rem, calc(1.25rem + env(safe-area-inset-bottom, 0px)));
   }
 
   .client-session-card {
@@ -1171,17 +1229,9 @@ body {
     left: 0;
     right: 0.75rem;
     z-index: 2;
-    height: 2rem;
+    height: 2.75rem;
     opacity: 1;
     transition: opacity 0.2s ease;
-  }
-
-  .client-session-rail .client-side-deck-scroll-fade {
-    opacity: 0;
-  }
-
-  .client-session-rail .client-side-deck-scroll-fade--visible {
-    opacity: 1;
   }
 
   .client-side-deck-scroll-fade--top {

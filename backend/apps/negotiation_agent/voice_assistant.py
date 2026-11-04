@@ -33,6 +33,39 @@ from .muse_client import client_assistant_model_id, client_assistant_reasoning_e
 logger = logging.getLogger(__name__)
 
 
+def _spoken_reply_from_cards(rfp: RFPSubmission) -> str | None:
+    """Concise spoken line after cards reflect the latest voice turn."""
+    rfp.refresh_from_db()
+    if not rfp_has_meaningful_cards(rfp):
+        return None
+    from .voice_scenario import build_autonomous_voice_intro
+
+    return build_autonomous_voice_intro(rfp, partial=bool(rfp.amber_conflict_fields_json))
+
+
+def _deterministic_voice_turn(cleaned: str) -> bool:
+    from .voice_scenario import _user_confirms_booking
+
+    lower = cleaned.lower()
+    if _user_confirms_booking(lower):
+        return True
+    if any(w in lower for w in ("negotiate", "discount", "better rate", "lower price")):
+        return True
+    return False
+
+
+def _deterministic_scenario_reply(
+    cleaned: str,
+    rfp: RFPSubmission | None,
+) -> str:
+    if rfp:
+        from .client_group_context import ensure_group_size_on_cards
+
+        ensure_group_size_on_cards(rfp)
+        rfp.refresh_from_db()
+    return scenario_reply(cleaned, rfp=rfp)
+
+
 def _persist_assistant_reply(rfp: RFPSubmission | None, reply: str) -> None:
     if not rfp or not (reply or "").strip():
         return
@@ -140,6 +173,12 @@ def generate_voice_assistant_reply_for_rfp(
             _persist_assistant_reply(rfp, ack)
             return ack
 
+        ensure_group_size_on_cards(rfp)
+        card_reply = _spoken_reply_from_cards(rfp)
+        if card_reply:
+            _persist_assistant_reply(rfp, card_reply)
+            return card_reply
+
     llm_intake = try_llm_intake_reply(rfp, cleaned) if rfp else None
     if llm_intake:
         persist_intake_reply(rfp, llm_intake)
@@ -147,43 +186,30 @@ def generate_voice_assistant_reply_for_rfp(
             rfp.save(update_fields=["client_session_json", "active_ui_cards_json", "updated_at"])
         return llm_intake
 
+    if _deterministic_voice_turn(cleaned):
+        if not rfp:
+            reply = (
+                "Pick the active session on the left, or tell me your dates and group size "
+                "so I can build your summary cards before you approve."
+            )
+            _persist_assistant_reply(rfp, reply)
+            return reply
+        reply = _deterministic_scenario_reply(cleaned, rfp)
+        if rfp:
+            rfp.refresh_from_db()
+            rfp.save(update_fields=["client_session_json", "active_ui_cards_json", "updated_at"])
+        _persist_assistant_reply(rfp, reply)
+        return reply
+
     scripted = scenario_reply(cleaned, rfp=rfp)
 
-    correction_hint = any(
-        w in cleaned.lower()
-        for w in (
-            "headcount",
-            "guest",
-            "people",
-            "night",
-            "nights",
-            "not ",
-            "actually",
-            "arriv",
-            "depart",
-            "check-in",
-            "check in",
-            "check-out",
-            "check out",
-            "tuesday",
-            "monday",
-            "wednesday",
-            "thursday",
-            "friday",
-            "sunday",
-            "participant",
-            "participants",
-            "several room",
-            "multiple room",
-            "next week",
-            "what kind",
-        )
-    )
-    if rfp and (rfp_has_meaningful_cards(rfp) or correction_hint):
-        _persist_assistant_reply(rfp, scripted)
-        return scripted
-
     if settings.USE_FIXTURE_DEBATE or not settings.META_MODEL_API_KEY:
+        if rfp:
+            ensure_group_size_on_cards(rfp)
+            card_reply = _spoken_reply_from_cards(rfp)
+            if card_reply:
+                _persist_assistant_reply(rfp, card_reply)
+                return card_reply
         _persist_assistant_reply(rfp, scripted)
         return scripted
 
@@ -341,6 +367,13 @@ def iter_voice_assistant_stream(
             yield {"type": "done", "reply": ack}
             return
 
+        ensure_group_size_on_cards(rfp)
+        card_reply = _spoken_reply_from_cards(rfp)
+        if card_reply:
+            _persist_assistant_reply(rfp, card_reply)
+            yield {"type": "done", "reply": card_reply}
+            return
+
     llm_intake = try_llm_intake_reply(rfp, cleaned) if rfp else None
     if llm_intake:
         persist_intake_reply(rfp, llm_intake)
@@ -349,52 +382,45 @@ def iter_voice_assistant_stream(
         yield {"type": "done", "reply": llm_intake}
         return
 
+    if _deterministic_voice_turn(cleaned):
+        if not rfp:
+            reply = (
+                "Pick the active session on the left, or tell me your dates and group size "
+                "so I can build your summary cards before you approve."
+            )
+            yield {"type": "status", "text": "Checking your session…"}
+            yield {"type": "done", "reply": reply}
+            return
+        yield {"type": "status", "text": "Updating your proposal…"}
+        reply = _deterministic_scenario_reply(cleaned, rfp)
+        if rfp:
+            rfp.refresh_from_db()
+            rfp.save(update_fields=["client_session_json", "active_ui_cards_json", "updated_at"])
+        _persist_assistant_reply(rfp, reply)
+        yield {"type": "done", "reply": reply}
+        return
+
     yield {"type": "status", "text": quick_voice_ack(cleaned)}
 
     for line in progressive_status_messages(cleaned, rfp=rfp):
         yield {"type": "status", "text": line}
 
     scripted = scenario_reply(cleaned, rfp=rfp)
-    correction_hint = any(
-        w in cleaned.lower()
-        for w in (
-            "headcount",
-            "guest",
-            "people",
-            "night",
-            "nights",
-            "not ",
-            "actually",
-            "arriv",
-            "depart",
-            "check-in",
-            "check in",
-            "check-out",
-            "check out",
-            "tuesday",
-            "monday",
-            "wednesday",
-            "thursday",
-            "friday",
-            "saturday",
-            "sunday",
-            "participant",
-            "participants",
-            "several room",
-            "multiple room",
-            "next week",
-            "what kind",
-        )
-    )
+
     use_scripted_only = (
-        (rfp and rfp_has_meaningful_cards(rfp))
-        or (rfp and correction_hint)
-        or settings.USE_FIXTURE_DEBATE
+        settings.USE_FIXTURE_DEBATE
         or not settings.META_MODEL_API_KEY
         or cleaned.lower() in {"hi", "hello", "hey", "yo"}
     )
 
     if use_scripted_only:
+        if rfp:
+            ensure_group_size_on_cards(rfp)
+            card_reply = _spoken_reply_from_cards(rfp)
+            if card_reply:
+                _persist_assistant_reply(rfp, card_reply)
+                yield {"type": "done", "reply": card_reply}
+                return
         _persist_assistant_reply(rfp, scripted)
         yield {"type": "done", "reply": scripted}
         return

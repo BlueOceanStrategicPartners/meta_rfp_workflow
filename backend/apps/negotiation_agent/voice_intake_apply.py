@@ -18,6 +18,21 @@ def _apply_patch(rfp: RFPSubmission, patch: dict[str, Any]) -> None:
     rfp.refresh_from_db()
 
 
+def merge_stay_patch_with_voice_extras(
+    stay_patch: dict[str, Any],
+    voice_patch: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Keep intake stay fields while merging seating/catering from the same utterance."""
+    if not voice_patch:
+        return stay_patch
+    merged = dict(stay_patch)
+    for key in ("meeting_space", "catering_av"):
+        chunk = voice_patch.get(key)
+        if isinstance(chunk, dict) and chunk:
+            merged[key] = {**(merged.get(key) or {}), **chunk}
+    return merged
+
+
 def build_stay_patch_from_dates(
     *,
     check_in: date,

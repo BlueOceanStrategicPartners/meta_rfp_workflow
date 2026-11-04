@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import type { AgentUiComponent } from "../lib/agentUiComponents";
-import { cardsHaveIdentifiedFields } from "../lib/rfpFlow";
+import { cardsHaveIdentifiedFields, cardsReadyForSummaryDeck } from "../lib/rfpFlow";
 
 /**
  * Side RFP cards appear only after the agent or extraction has identified real event data.
@@ -12,7 +12,7 @@ export function useClientCardDeckVisibility(
   agentUiComponent: AgentUiComponent | null,
 ) {
   return useMemo(() => {
-    const identified = cardsHaveIdentifiedFields(cards);
+    const identified = cardsReadyForSummaryDeck(cards);
     const showCardDeck = Boolean(sessionId && identified);
     const showGenerativeSidePanel = Boolean(agentUiComponent);
     return {

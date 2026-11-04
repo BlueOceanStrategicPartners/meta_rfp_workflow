@@ -288,6 +288,34 @@ def checkout_after_checkin(day: int, check_in: date) -> date:
 
 def parse_stay_dates_from_voice(message: str) -> tuple[date, date] | None:
     lower = message.lower()
+    ref = voice_today()
+    month_hits: list[date] = []
+    for month_token, month_num in sorted(_MONTH_NAMES.items(), key=lambda x: -len(x[0])):
+        for m in re.finditer(
+            rf"\b{re.escape(month_token)}\.?\s+(\d{{1,2}})(?:st|nd|rd|th)?\b",
+            lower,
+        ):
+            day = int(m.group(1))
+            candidate = _resolve_day_in_month(day, ref.year, month_num)
+            if candidate < ref:
+                candidate = _resolve_day_in_month(day, ref.year + 1, month_num)
+            month_hits.append(candidate)
+    month_hits = sorted(set(month_hits))
+    if len(month_hits) >= 2:
+        return month_hits[0], month_hits[-1]
+    if len(month_hits) == 1:
+        nights = parse_duration_nights_from_voice(message)
+        if not nights:
+            m = re.search(
+                r"\b(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s*[\-\s]?nights?\b",
+                lower,
+            )
+            if m:
+                token = m.group(1)
+                nights = 1 if token in {"one", "a", "1"} else int(token) if token.isdigit() else None
+        if nights and nights > 0:
+            return month_hits[0], month_hits[0] + timedelta(days=max(1, nights))
+
     arrive_day: int | None = None
     depart_day: int | None = None
 

@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import CustomScrollArea, { type ScrollEdgeState } from "../ui/CustomScrollArea";
+import CustomScrollArea from "../ui/CustomScrollArea";
 import ClientSessionProposalPreview from "./ClientSessionProposalPreview";
 import type { ClientRfpSessionSummary } from "../../lib/clientApi";
 
@@ -8,7 +8,6 @@ type Props = {
   sessions: ClientRfpSessionSummary[];
   activeSessionId: string | null;
   loading?: boolean;
-  composerOpen?: boolean;
   archiveBusyId?: string | null;
   onSelect: (sessionId: string) => void;
   onArchive: (sessionId: string, archived: boolean) => boolean | null | Promise<boolean | null>;
@@ -66,24 +65,11 @@ export default function ClientSessionHistoryRail({
   sessions,
   activeSessionId,
   loading,
-  composerOpen = false,
   archiveBusyId = null,
   onSelect,
   onArchive,
 }: Props) {
   const [showArchived, setShowArchived] = useState(false);
-  const [scrollEdges, setScrollEdges] = useState<ScrollEdgeState>({
-    canScroll: false,
-    atTop: true,
-    atBottom: true,
-  });
-  const onScrollEdges = useCallback((state: ScrollEdgeState) => {
-    setScrollEdges((prev) =>
-      prev.canScroll === state.canScroll && prev.atTop === state.atTop && prev.atBottom === state.atBottom
-        ? prev
-        : state,
-    );
-  }, []);
 
   const visibleSessions = useMemo(
     () => sessions.filter((s) => Boolean(s.archived) === showArchived),
@@ -94,21 +80,13 @@ export default function ClientSessionHistoryRail({
 
   const listKey = showArchived ? "archived" : "active";
 
-  useEffect(() => {
-    setScrollEdges({ canScroll: false, atTop: true, atBottom: true });
-  }, [listKey]);
-
-  const showTopFade = scrollEdges.canScroll && !scrollEdges.atTop;
-  const showBottomFade = scrollEdges.canScroll && !scrollEdges.atBottom;
-
   return (
     <motion.aside
       initial={{ opacity: 0, x: -20 }}
       animate={{ opacity: 1, x: 0 }}
       transition={{ duration: 0.45, ease: [0.45, 0.05, 0.25, 1] }}
       className={[
-        "client-side-deck client-session-rail pointer-events-auto fixed left-3 top-[4.75rem] z-30 flex w-[min(20rem,calc(100vw-1.5rem))] flex-col sm:left-4 sm:w-80",
-        composerOpen ? "bottom-[7.25rem]" : "bottom-14",
+        "client-side-deck client-session-rail pointer-events-auto fixed left-3 top-[4.75rem] bottom-0 z-30 flex w-[min(20rem,calc(100vw-1.5rem))] flex-col overflow-hidden bg-transparent sm:left-4 sm:w-80",
       ].join(" ")}
       aria-label="Your RFP sessions"
     >
@@ -142,24 +120,9 @@ export default function ClientSessionHistoryRail({
       </div>
 
       <div className="client-side-deck-scroll-shell client-session-rail__scroll relative min-h-0 flex-1">
-        <div
-          className={[
-            "client-side-deck-scroll-fade client-side-deck-scroll-fade--top",
-            showTopFade ? "client-side-deck-scroll-fade--visible" : "",
-          ].join(" ")}
-          aria-hidden
-        />
-        <div
-          className={[
-            "client-side-deck-scroll-fade client-side-deck-scroll-fade--bottom",
-            showBottomFade ? "client-side-deck-scroll-fade--visible" : "",
-          ].join(" ")}
-          aria-hidden
-        />
         <CustomScrollArea
-          className="absolute inset-0"
+          className="absolute inset-0 min-h-0"
           contentClassName="client-session-rail__scroll-content flex flex-col gap-2.5"
-          onScrollEdges={onScrollEdges}
           contentKey={listKey}
         >
           <div key={listKey} className="flex flex-col gap-2.5">
