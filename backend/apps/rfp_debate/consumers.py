@@ -29,6 +29,22 @@ class RFPSessionConsumer(AsyncJsonWebsocketConsumer):
                         "payload": result,
                     }
                 )
+        elif message_type == "proposal_interaction_submit":
+            result = await self._proposal_interaction(content.get("payload", {}))
+            if result.get("ok"):
+                if result.get("quote"):
+                    await self.send_json({"type": "pricing_quote", "payload": result["quote"]})
+            else:
+                await self.send_json({"type": "validation_error", "payload": result})
+
+    async def _proposal_interaction(self, payload):
+        from asgiref.sync import sync_to_async
+        from apps.negotiation_agent.proposal_interaction import handle_proposal_interaction
+
+        try:
+            return await sync_to_async(handle_proposal_interaction)(self.session_id, payload or {})
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
 
     async def _validate_cards(self, payload):
         from asgiref.sync import sync_to_async

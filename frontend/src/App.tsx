@@ -10,6 +10,7 @@ import {
 } from "./components/AppNavIcons";
 import { useAppShell } from "./context/AppShellContext";
 import { logoutDesigner } from "./lib/designerApi";
+import { logoutClient } from "./lib/clientApi";
 import ClientWorkspace from "./pages/ClientWorkspace";
 import DesignerPortal from "./pages/DesignerPortal";
 import AdminPortal from "./pages/AdminPortal";
@@ -21,7 +22,7 @@ const PRIMARY_NAV = [
 ] as const;
 
 export default function App() {
-  const { theme, toggleTheme, designerAuthed, setDesignerAuthed, clientSubtitlesEnabled, toggleClientSubtitles, clientProposalFullscreen } =
+  const { theme, toggleTheme, designerAuthed, setDesignerAuthed, clientAuthed, setClientAuthed, clientSubtitlesEnabled, toggleClientSubtitles, clientProposalFullscreen } =
     useAppShell();
   const location = useLocation();
   const navigate = useNavigate();
@@ -38,16 +39,21 @@ export default function App() {
   const onStudio = location.pathname.startsWith("/designer");
   const onAdmin = location.pathname.startsWith("/admin");
 
-  const studioLoginPath = onAdmin ? "/admin" : "/designer";
+  const studioLoginPath = onAdmin ? "/admin" : onClient ? "/client" : "/designer";
   const [confirmLogoutOpen, setConfirmLogoutOpen] = useState(false);
   const [logoutBusy, setLogoutBusy] = useState(false);
 
   const handleLogout = async () => {
     setLogoutBusy(true);
     try {
-      await logoutDesigner();
+      if (onClient && clientAuthed) {
+        await logoutClient();
+        setClientAuthed(false);
+      } else {
+        await logoutDesigner();
+        setDesignerAuthed(false);
+      }
     } finally {
-      setDesignerAuthed(false);
       setConfirmLogoutOpen(false);
       setLogoutBusy(false);
       navigate(studioLoginPath, { replace: true });
@@ -104,6 +110,16 @@ export default function App() {
             {theme === "dark" ? <IconSun /> : <IconMoon />}
           </TemplateIconButton>
           {(onStudio || onAdmin) && designerAuthed && (
+            <TemplateIconButton
+              compact
+              label="Log out"
+              variant="danger"
+              onClick={() => setConfirmLogoutOpen(true)}
+            >
+              <IconLogout />
+            </TemplateIconButton>
+          )}
+          {onClient && clientAuthed && (
             <TemplateIconButton
               compact
               label="Log out"

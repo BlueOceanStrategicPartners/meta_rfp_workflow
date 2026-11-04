@@ -111,6 +111,7 @@ import {
 } from "../lib/studioLastSelection";
 import { useStudioPortalAuth } from "../hooks/useStudioPortalAuth";
 import { useLivePreviewIframeScrollPort } from "../hooks/useLivePreviewIframeScrollPort";
+import { useLivePreviewIframeNavigationLock } from "../hooks/useLivePreviewIframeNavigationLock";
 import { useAppShell } from "../context/AppShellContext";
 
 const ACCEPT = "image/*,video/*";
@@ -219,6 +220,7 @@ export default function DesignerPortal() {
   const previewScrollRef = useRef<HTMLDivElement>(null);
   const previewPickShieldRef = useRef<HTMLDivElement>(null);
   const livePreviewIframeHeight = useLivePreviewIframeScrollPort(previewIframeRef, previewDoc);
+  useLivePreviewIframeNavigationLock(previewIframeRef, previewDoc);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -296,16 +298,23 @@ export default function DesignerPortal() {
     timer: number;
   }>({ lastAt: 0, pending: null, timer: 0 });
 
-  const flushAgentPreviewNow = useCallback((snap: AgentPreviewSnapshot) => {
-    flushSync(() => {
-      setHtml(snap.html_markup);
-      setCss(snap.css_stylesheet);
-      setJs(snap.js_script);
-      setPreviewDoc(compileLocalTemplatePreview(snap.html_markup, snap.css_stylesheet, snap.js_script));
-    });
-    previewRefreshRef.current.lastAt = Date.now();
-    previewRefreshRef.current.pending = null;
-  }, []);
+  const flushAgentPreviewNow = useCallback(
+    (snap: AgentPreviewSnapshot) => {
+      flushSync(() => {
+        setHtml(snap.html_markup);
+        setCss(snap.css_stylesheet);
+        setJs(snap.js_script);
+        setPreviewDoc(
+          compileLocalTemplatePreview(snap.html_markup, snap.css_stylesheet, snap.js_script, {
+            useSampleData: showSampleData,
+          }),
+        );
+      });
+      previewRefreshRef.current.lastAt = Date.now();
+      previewRefreshRef.current.pending = null;
+    },
+    [showSampleData],
+  );
 
   const applyAgentPreviewSnapshot = useCallback(
     (snap: AgentPreviewSnapshot) => {
@@ -616,15 +625,29 @@ export default function DesignerPortal() {
 
   const runValidate = async () => {
     setBusy(true);
+    setSrStatus("Checking template and applying fixes…");
     try {
-      const result = await validateTemplate(html, css, js);
+      const result = await validateTemplate(html, css, js, { autoRepair: true });
+      if (
+        result.repaired ||
+        (result.valid && result.html_markup != null && result.html_markup !== html)
+      ) {
+        if (result.html_markup != null) setHtml(result.html_markup);
+        if (result.css_stylesheet != null) setCss(result.css_stylesheet);
+        if (result.js_script != null) setJs(result.js_script);
+        await refreshPreview();
+      }
+      const passes = result.repair_passes ?? 0;
       const message = result.valid
-        ? `Valid — ${result.summary}`
-        : `Issues: ${(result.issues || []).join("; ")}`;
+        ? passes > 0
+          ? `Valid after ${passes} automatic fix pass(es). — ${result.summary ?? ""}`
+          : `Valid — ${result.summary ?? "Template passes validation."}`
+        : `Could not fix all issues: ${(result.issues || []).join("; ")}`;
       showSnackbar(message, result.valid ? "success" : "warning");
-      setSrStatus(result.valid ? "Validation passed." : "Validation found issues.");
+      setSrStatus(result.valid ? "Validation passed." : "Some validation issues remain.");
     } catch {
       showSnackbar("Template check failed. Try again.", "error");
+      setSrStatus("");
     } finally {
       setBusy(false);
     }
@@ -635,11 +658,15 @@ export default function DesignerPortal() {
       setPreviewDoc("");
       return;
     }
-    if (showSampleData) {
-      const data = await previewTemplate(html, css, js);
+    try {
+      const data = await previewTemplate(html, css, js, showSampleData);
       setPreviewDoc(applyLivePreviewDocumentChrome(data.compiled_html || ""));
-    } else {
-      setPreviewDoc(compileLocalTemplatePreview(html, css, js));
+    } catch {
+      setPreviewDoc(
+        applyLivePreviewDocumentChrome(
+          compileLocalTemplatePreview(html, css, js, { useSampleData: showSampleData }),
+        ),
+      );
     }
   }, [css, html, js, showSampleData]);
 
@@ -1285,7 +1312,7 @@ const PREVIEW_ISSUE_MESSAGE = /preview|not showing|close button|looks wrong|debu
       </TemplateIconButton>
       <TemplateIconButton
         compact
-        label={showSampleData ? "Sample RFP data on" : "Sample RFP data off"}
+        label={showSampleData ? "Sample RFP data on" : "Sample RFP data off (empty bindings)"}
         selected={showSampleData}
         onClick={() => setShowSampleData((v) => !v)}
       >
@@ -1293,7 +1320,7 @@ const PREVIEW_ISSUE_MESSAGE = /preview|not showing|close button|looks wrong|debu
       </TemplateIconButton>
       <TemplateIconButton
         compact
-        label="Check template"
+        label="Check template (auto-fix)"
         variant="primary"
         disabled={busy || !html}
         onClick={() => void runValidate()}
@@ -1305,16 +1332,21 @@ const PREVIEW_ISSUE_MESSAGE = /preview|not showing|close button|looks wrong|debu
 
   const renderLivePreview = (mode: "inline" | "fullscreen") => {
     const fullscreen = mode === "fullscreen";
+    const lightPreview = theme === "light";
     return (
       <section
         className={
           fullscreen
-            ? "fixed inset-0 z-[300] flex h-dvh w-dvw min-h-0 flex-col overflow-hidden bg-[#0a0f1a]"
+            ? `studio-live-preview-panel studio-live-preview-panel--fullscreen fixed inset-0 z-[300] flex h-dvh w-dvw min-h-0 flex-col overflow-hidden ${
+                lightPreview ? "designer-shell-light" : "bg-[#0a0f1a] text-white"
+              }`
             : "studio-shell-panel studio-live-preview-panel studio-live-preview-panel--inline"
         }
       >
         <header
-          className={`shrink-0 border-b border-white/10 ${fullscreen ? "bg-[#0a0f1a]/98 px-4 py-3" : ""}`}
+          className={`shrink-0 border-b ${fullscreen ? "px-4 py-3" : ""} ${
+            fullscreen && !lightPreview ? "border-white/10 bg-[#0a0f1a]/98" : "border-white/10"
+          }`}
         >
           <div
             className={`flex flex-wrap items-center justify-between gap-3 ${fullscreen ? "" : "px-[var(--studio-inset-x)] pb-4 pt-5"}`}
@@ -1467,7 +1499,7 @@ const PREVIEW_ISSUE_MESSAGE = /preview|not showing|close button|looks wrong|debu
         </aside>
 
         <section
-          className="studio-shell-panel relative flex min-h-0 min-w-0 flex-1 flex-col bg-white/[0.03]"
+          className="studio-shell-panel relative flex min-h-0 min-w-0 flex-1 flex-col"
           onDragOver={(e) => { e.preventDefault(); setDragActive(true); }}
           onDragLeave={() => setDragActive(false)}
           onDrop={async (e: DragEvent) => { e.preventDefault(); setDragActive(false); if (e.dataTransfer.files?.length) await uploadFiles(e.dataTransfer.files); }}
@@ -1532,7 +1564,7 @@ const PREVIEW_ISSUE_MESSAGE = /preview|not showing|close button|looks wrong|debu
             {clarifications.length > 0 && (
               <div className="flex flex-wrap gap-2">
                 {clarifications.map((c) => (
-                  <button key={c} type="button" className="rounded-full bg-fuchsia-600/30 px-3 py-1 text-xs hover:bg-fuchsia-600/50" onClick={() => {
+                  <button key={c} type="button" className="studio-clarify-chip" onClick={() => {
                     if (FLOORPLAN_UPLOAD_CHIP.test(c) && attachments.length === 0) {
                       showSnackbar("Attach a floorplan image first, then tap this again or send.", "warning");
                       fileInputRef.current?.click();
@@ -1598,7 +1630,7 @@ const PREVIEW_ISSUE_MESSAGE = /preview|not showing|close button|looks wrong|debu
                 </span>
                 <button
                   type="button"
-                  className="ml-1 rounded px-1 text-white/70 hover:bg-white/10"
+                  className="studio-preview-target-chip-clear"
                   aria-label="Clear preview target"
                   onClick={() => setPreviewElementTarget(null)}
                 >

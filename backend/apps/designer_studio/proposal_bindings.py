@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import date
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -10,8 +11,12 @@ from typing import Any
 _SAMPLES_DIR = Path(__file__).resolve().parent / "samples"
 _SEED_PATH = _SAMPLES_DIR / "proposal_binding_seed.json"
 _RUNTIME_PATH = _SAMPLES_DIR / "proposal_binding_runtime.js"
+_CLIENT_BRIDGE_PATH = _SAMPLES_DIR / "proposal_client_bridge.js"
 
-CTA_BUTTON_HTML = '<button type="button" class="proposal-cta">Accept Proposal</button>'
+CTA_BUTTON_HTML = (
+    '<button type="button" class="proposal-cta" data-proposal-action="accept" '
+    'data-proposal-label="Accept proposal">Accept Proposal</button>'
+)
 
 # Universal registry: token → payload key (seed / cards JSON). Schema can grow without prompt rewrites.
 BINDING_TOKEN_REGISTRY: dict[str, str] = {
@@ -51,6 +56,64 @@ def load_proposal_binding_runtime_js() -> str:
 
 def clear_binding_seed_cache() -> None:
     load_proposal_binding_seed.cache_clear()
+
+
+def _parse_iso_date(value: Any) -> date | None:
+    if not value:
+        return None
+    try:
+        return date.fromisoformat(str(value)[:10])
+    except ValueError:
+        return None
+
+
+def _format_event_display_range(check_in: Any, check_out: Any) -> str:
+    d0 = _parse_iso_date(check_in)
+    d1 = _parse_iso_date(check_out)
+    if d0 and d1:
+        if d0.year == d1.year:
+            if d0.month == d1.month:
+                return f"{d0.strftime('%b %d')} – {d1.strftime('%d, %Y')}"
+            return f"{d0.strftime('%b %d')} – {d1.strftime('%b %d, %Y')}"
+        return f"{d0.strftime('%b %d, %Y')} – {d1.strftime('%b %d, %Y')}"
+    if d0:
+        return d0.strftime("%b %d, %Y")
+    if d1:
+        return d1.strftime("%b %d, %Y")
+    parts = [str(x) for x in (check_in, check_out) if x]
+    return " — ".join(parts) if parts else ""
+
+
+def line_items_from_peak_and_nights(
+    room_block: dict[str, Any],
+    *,
+    event_overview: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    """Voice/card UI often sets peak_rooms + total_room_nights without nightly blocks[]."""
+    peak = int(room_block.get("peak_rooms") or 0)
+    nights = int(room_block.get("total_room_nights") or 0)
+    if peak <= 0:
+        return []
+    nights = max(nights, 1)
+    overview = event_overview or {}
+    ci = overview.get("check_in_date") or ""
+    co = overview.get("check_out_date") or ""
+    date_range = _format_event_display_range(ci, co) or (
+        f"{ci} – {co}".strip(" –") if ci or co else "Your dates"
+    )
+    rack = 189
+    return [
+        {
+            "category_name": "Guest room block",
+            "category_subtitle": f"{peak} rooms per night · {nights} night(s)",
+            "badge": "",
+            "date_range": date_range,
+            "nights": nights,
+            "quantity": peak,
+            "rate_per_night": rack,
+            "estimated_total": peak * nights * rack,
+        }
+    ]
 
 
 def _normalize_line_item(raw: dict[str, Any]) -> dict[str, Any]:
@@ -123,6 +186,8 @@ def resolve_verified_room_blocks_payload(
         line_items = [_normalize_line_item(dict(x)) for x in raw_items if isinstance(x, dict)]
     else:
         line_items = line_items_from_legacy_blocks(rb, event_overview=event_overview)
+    if not line_items:
+        line_items = line_items_from_peak_and_nights(rb, event_overview=event_overview)
     if not line_items and use_seed_if_empty:
         seed = load_proposal_binding_seed()
         return dict(seed.get("verified_room_blocks") or {})
@@ -248,17 +313,31 @@ def substitute_bindings_in_html(html: str, payloads: dict[str, Any]) -> str:
     return out
 
 
-def sample_binding_payloads() -> dict[str, Any]:
-    """Full binding map keyed by payload name (matches compile / cards resolution)."""
-    seed = load_proposal_binding_seed()
-    return build_binding_payloads_from_cards(
-        {
-            "event_overview": seed.get("event_overview") or {},
-            "room_block": {},
-            "meeting_space": seed.get("meeting_space_specs") or {},
+def empty_binding_payloads() -> dict[str, Any]:
+    """Neutral payloads for Designer preview with sample data off (matches empty client cards)."""
+    return {
+        "verified_room_blocks": {
+            "schema_version": 1,
+            "line_items": [],
+            "summary": {},
+            "blocks": [],
         },
-        use_seed_if_empty=True,
-    )
+        "event_dates": {
+            "check_in": "",
+            "check_out": "",
+            "display_range": "",
+            "nights": 0,
+        },
+        "client_name": {"company_name": ""},
+        "meeting_space_specs": {
+            "name": "",
+            "seating_style": None,
+            "headcount": None,
+            "av": None,
+        },
+        "xgboost_quote_breakdown": {},
+        "negotiated_concessions": {"items": []},
+    }
 
 
 def build_binding_payloads_from_cards(
@@ -273,15 +352,22 @@ def build_binding_payloads_from_cards(
     room_block = cards.get("room_block") or {}
 
     event_dates = dict(seed["event_dates"])
-    if overview.get("check_in_date") or overview.get("check_out_date"):
-        ci = overview.get("check_in_date")
-        co = overview.get("check_out_date")
+    ci = overview.get("check_in_date")
+    co = overview.get("check_out_date")
+    if ci or co:
+        nights = int(room_block.get("total_room_nights") or 0)
+        if not nights:
+            d0 = _parse_iso_date(ci)
+            d1 = _parse_iso_date(co)
+            if d0 and d1 and d1 > d0:
+                nights = max((d1 - d0).days, 1)
+            else:
+                nights = 1
         event_dates = {
             "check_in": ci,
             "check_out": co,
-            "display_range": seed["event_dates"].get("display_range")
-            or " — ".join(str(x) for x in (ci, co) if x),
-            "nights": event_dates.get("nights"),
+            "display_range": _format_event_display_range(ci, co),
+            "nights": nights,
         }
 
     verified_room_blocks = resolve_verified_room_blocks_payload(
@@ -325,6 +411,19 @@ def build_binding_payloads_from_cards(
     }
 
 
+def sample_binding_payloads() -> dict[str, Any]:
+    """Full binding map keyed by payload name (matches compile / cards resolution)."""
+    seed = load_proposal_binding_seed()
+    return build_binding_payloads_from_cards(
+        {
+            "event_overview": seed.get("event_overview") or {},
+            "room_block": {},
+            "meeting_space": seed.get("meeting_space_specs") or {},
+        },
+        use_seed_if_empty=True,
+    )
+
+
 def build_binding_replacements(
     cards: dict[str, Any],
     *,
@@ -352,16 +451,19 @@ def compile_html_with_bindings(
     use_seed_if_empty: bool = True,
 ) -> str:
     cards = cards or {}
-    if not cards and use_seed_if_empty:
-        seed = load_proposal_binding_seed()
-        cards = {
-            "event_overview": seed.get("event_overview") or {},
-            "room_block": {},
-            "meeting_space": seed.get("meeting_space_specs") or {},
-        }
-    payloads = build_binding_payloads_from_cards(
-        cards, quote=quote, use_seed_if_empty=use_seed_if_empty
-    )
+    if not cards and not use_seed_if_empty:
+        payloads = empty_binding_payloads()
+    else:
+        if not cards and use_seed_if_empty:
+            seed = load_proposal_binding_seed()
+            cards = {
+                "event_overview": seed.get("event_overview") or {},
+                "room_block": {},
+                "meeting_space": seed.get("meeting_space_specs") or {},
+            }
+        payloads = build_binding_payloads_from_cards(
+            cards, quote=quote, use_seed_if_empty=use_seed_if_empty
+        )
     body = substitute_bindings_in_html(html or "", payloads)
     body = body.replace("{{cta_accept_button}}", CTA_BUTTON_HTML)
     return body
@@ -370,10 +472,40 @@ def compile_html_with_bindings(
 def inject_proposal_binding_runtime(html_document: str) -> str:
     """Append hydrate runtime once for compiled preview / client render."""
     if "proposalBindingHydrate" in html_document:
-        return html_document
+        return inject_proposal_client_bridge(html_document)
     script = load_proposal_binding_runtime_js()
     block = f'<script data-proposal-binding-runtime="1">\n{script}\n</script>'
     if "</body>" in html_document.lower():
         idx = html_document.lower().rfind("</body>")
+        html_document = html_document[:idx] + block + html_document[idx:]
+    else:
+        html_document = html_document + block
+    return inject_proposal_client_bridge(html_document)
+
+
+@lru_cache(maxsize=1)
+def load_proposal_client_bridge_js() -> str:
+    return _CLIENT_BRIDGE_PATH.read_text(encoding="utf-8")
+
+
+def inject_proposal_client_bridge(html_document: str) -> str:
+    """Append client↔parent postMessage bridge for live proposal interactions."""
+    if "rfpProposalEmit" in html_document or "data-proposal-client-bridge" in html_document:
+        return html_document
+    script = load_proposal_client_bridge_js()
+    block = f'<script data-proposal-client-bridge="1">\n{script}\n</script>'
+    if "</body>" in html_document.lower():
+        idx = html_document.lower().rfind("</body>")
         return html_document[:idx] + block + html_document[idx:]
     return html_document + block
+
+
+def ensure_client_bridge_script_tag(html_markup: str) -> str:
+    """Designer template storage: add script src if bridge not present."""
+    if not html_markup or "rfpProposalEmit" in html_markup or "proposal_client_bridge.js" in html_markup:
+        return html_markup
+    tag = '<script src="/proposal_client_bridge.js" data-proposal-client-bridge="1"></script>'
+    if "</body>" in html_markup.lower():
+        idx = html_markup.lower().rfind("</body>")
+        return html_markup[:idx] + tag + html_markup[idx:]
+    return html_markup + tag

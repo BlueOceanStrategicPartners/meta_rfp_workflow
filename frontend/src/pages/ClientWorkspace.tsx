@@ -7,6 +7,9 @@ import AgentAvailabilityTable from "../components/generative_ui/AgentAvailabilit
 import AgentCardDeck from "../components/generative_ui/AgentCardDeck";
 import ProposalTemplateRenderer from "../components/generative_ui/ProposalTemplateRenderer";
 import VoiceAgentSubtitles, { type CaptionLine } from "../components/voice/VoiceAgentSubtitles";
+import StudioPortalLogin from "../components/designer/StudioPortalLogin";
+import ClientSessionHistoryRail from "../components/client/ClientSessionHistoryRail";
+import { clearSessionProposalPreviewCache } from "../components/client/ClientSessionProposalPreview";
 import { useVoiceOrbAudio } from "../hooks/useVoiceOrbAudio";
 import { useMuseVoiceTranscribe } from "../hooks/useMuseVoiceTranscribe";
 import { useBidirectionalAgentUI } from "../hooks/useBidirectionalAgentUI";
@@ -18,6 +21,14 @@ import { createRfpSession, fetchRfpCards, renderClientProposal, userMessageConfi
 import ClientMiniVoiceOrb from "../components/composer/ClientMiniVoiceOrb";
 import { streamAssistantReply } from "../lib/voiceChatStream";
 import { sanitizeClientMessage } from "../lib/sanitizeClientMessage";
+import type { ProposalInteractionPayload } from "../lib/proposalClientBridge";
+import {
+  fetchClientRfpSession,
+  listClientRfpSessions,
+  loginClient,
+  type ClientRfpSessionSummary,
+} from "../lib/clientApi";
+import { useClientPortalAuth } from "../hooks/useClientPortalAuth";
 import { useAppShell } from "../context/AppShellContext";
 
 function newCaptionId() {
@@ -26,6 +37,14 @@ function newCaptionId() {
 
 export default function ClientWorkspace() {
   const { clientSubtitlesEnabled, setClientProposalFullscreen } = useAppShell();
+  const { authed, bootstrapping, confirmSession } = useClientPortalAuth();
+  const [loginEmail, setLoginEmail] = useState("client@demo.local");
+  const [loginPassword, setLoginPassword] = useState("demo12345");
+  const [loginError, setLoginError] = useState<string | null>(null);
+  const [loginBusy, setLoginBusy] = useState(false);
+  const [sessionSummaries, setSessionSummaries] = useState<ClientRfpSessionSummary[]>([]);
+  const [sessionsLoading, setSessionsLoading] = useState(false);
+  const [sessionCompleted, setSessionCompleted] = useState(false);
   const [composerOpen, setComposerOpen] = useState(true);
   const [proposalPresentation, setProposalPresentation] = useState(false);
   const [dragging, setDragging] = useState(false);
@@ -194,7 +213,7 @@ export default function ClientWorkspace() {
     [appendCaption, speakOnce],
   );
 
-  const { cards, proposalHtml, debateRings, error, submitCardMutation, markCardSaving, clientSession, cardSaveState, cardValidationError, setCards, clearProposalHtml, setProposalHtml } =
+  const { cards, proposalHtml, debateRings, error, submitCardMutation, submitProposalInteraction, markCardSaving, clientSession, cardSaveState, cardValidationError, setCards, clearProposalHtml, setProposalHtml, hydrateSession } =
     useBidirectionalAgentUI(sessionId, handleAgentUtterance);
 
   useEffect(() => {
@@ -208,6 +227,55 @@ export default function ClientWorkspace() {
     setClientProposalFullscreen(proposalPresentation);
     return () => setClientProposalFullscreen(false);
   }, [proposalPresentation, setClientProposalFullscreen]);
+
+  const refreshSessions = useCallback(async () => {
+    if (!authed) return;
+    setSessionsLoading(true);
+    try {
+      setSessionSummaries(await listClientRfpSessions());
+    } finally {
+      setSessionsLoading(false);
+    }
+  }, [authed]);
+
+  useEffect(() => {
+    void refreshSessions();
+  }, [refreshSessions]);
+
+  const activateSession = useCallback(
+    async (id: string) => {
+      const detail = await fetchClientRfpSession(id);
+      if (!detail) return;
+      setSessionId(id);
+      sessionIdRef.current = id;
+      setSessionCompleted(detail.completed);
+      setCards(detail.active_ui_cards_json || {});
+      hydrateSession({ active_ui_cards_json: detail.active_ui_cards_json, client_session_json: detail.client_session });
+      setCaptions([]);
+      setAgentUiComponent(null);
+      if (detail.completed) {
+        const html = await renderClientProposal(id);
+        if (html) {
+          setProposalHtml(html);
+          setProposalPresentation(true);
+        }
+      } else {
+        setProposalPresentation(false);
+        clearProposalHtml();
+      }
+    },
+    [clearProposalHtml, hydrateSession, setCards, setProposalHtml],
+  );
+
+  const openProposalView = useCallback(async () => {
+    const sid = sessionIdRef.current;
+    if (!sid) return;
+    const html = await renderClientProposal(sid);
+    if (html) {
+      setProposalHtml(html);
+      setProposalPresentation(true);
+    }
+  }, [setProposalHtml]);
 
   const ensureSession = useCallback(
     async (
@@ -228,6 +296,8 @@ export default function ClientWorkspace() {
       if (!created.ok) return { error: created.message };
       setSessionId(created.id);
       sessionIdRef.current = created.id;
+      setSessionCompleted(false);
+      void refreshSessions();
       if (runDebate) {
         if (cardsHaveIdentifiedFields(created.cards)) {
           setCards(created.cards);
@@ -246,7 +316,7 @@ export default function ClientWorkspace() {
         voiceIntro: created.voiceIntro || undefined,
       };
     },
-    [setCards],
+    [refreshSessions, setCards],
   );
 
   useEffect(() => {
@@ -313,6 +383,8 @@ export default function ClientWorkspace() {
           if (created.ok) {
             setSessionId(created.id);
             sessionIdRef.current = created.id;
+            setSessionCompleted(false);
+            void refreshSessions();
             if (cardsHaveIdentifiedFields(created.cards)) setCards(created.cards);
           }
         }
@@ -350,6 +422,9 @@ export default function ClientWorkspace() {
             if (html) {
               setProposalHtml(html);
               setProposalPresentation(true);
+              setSessionCompleted(true);
+              clearSessionProposalPreviewCache(sid);
+              void refreshSessions();
             }
           }
         }
@@ -358,7 +433,7 @@ export default function ClientWorkspace() {
         setProgressText(null);
       }
     },
-    [appendCaption, cards, ensureSession, patchCaption, speakOnce],
+    [appendCaption, cards, ensureSession, patchCaption, refreshSessions, speakOnce],
   );
 
   askAssistantRef.current = askAssistant;
@@ -433,6 +508,8 @@ export default function ClientWorkspace() {
       if (created.ok) {
         setSessionId(created.id);
         sessionIdRef.current = created.id;
+        setSessionCompleted(false);
+        void refreshSessions();
         const deck = cardsHaveIdentifiedFields(created.cards)
           ? created.cards
           : await waitForRfpCards(created.id);
@@ -449,7 +526,7 @@ export default function ClientWorkspace() {
         setStatusHint(created.message);
       }
     },
-    [appendCaption, setCards, speakOnce, synthesizePulse],
+    [appendCaption, refreshSessions, setCards, speakOnce, synthesizePulse],
   );
 
   const onComposerSend = useCallback(
@@ -478,6 +555,35 @@ export default function ClientWorkspace() {
     setComposerOpen(true);
   }, [clearProposalHtml]);
 
+  const startNewSession = useCallback(() => {
+    setSessionId(null);
+    sessionIdRef.current = null;
+    setSessionCompleted(false);
+    setProposalPresentation(false);
+    clearProposalHtml();
+    setCards({});
+    hydrateSession({ active_ui_cards_json: {}, client_session_json: {} });
+    setCaptions([]);
+    setAgentUiComponent(null);
+    setStatusHint(null);
+    setComposerOpen(true);
+    lastSpokenRef.current = null;
+    liveUserCaptionRef.current = null;
+  }, [clearProposalHtml, hydrateSession, setCards]);
+
+  const handleProposalInteraction = useCallback(
+    (payload: ProposalInteractionPayload) => {
+      submitProposalInteraction({
+        kind: payload.kind,
+        action: payload.action,
+        label: payload.label,
+        cardPatch: payload.cardPatch ?? null,
+        meta: payload.meta ?? {},
+      });
+    },
+    [submitProposalInteraction],
+  );
+
   const subtitleBandActive =
     clientSubtitlesEnabled &&
     (captions.length > 0 || thinking || agentSpeaking || progressText != null);
@@ -495,6 +601,42 @@ export default function ClientWorkspace() {
     }
   }, [appendCaption, speakOnce]);
 
+  if (bootstrapping) {
+    return (
+      <div className="flex h-full min-h-[50vh] items-center justify-center text-sm client-hint-muted">
+        Checking your session…
+      </div>
+    );
+  }
+
+  if (!authed) {
+    return (
+      <StudioPortalLogin
+        title="Client portal"
+        subtitle="Sign in to save and resume your RFP sessions"
+        email={loginEmail}
+        password={loginPassword}
+        error={loginError}
+        busy={loginBusy}
+        onEmailChange={setLoginEmail}
+        onPasswordChange={setLoginPassword}
+        onSubmit={async () => {
+          setLoginBusy(true);
+          setLoginError(null);
+          try {
+            const session = await loginClient(loginEmail, loginPassword);
+            const ok = await confirmSession(session);
+            if (!ok) setLoginError("Could not confirm session. Try again.");
+          } catch (err) {
+            setLoginError(err instanceof Error ? err.message : "Login failed");
+          } finally {
+            setLoginBusy(false);
+          }
+        }}
+      />
+    );
+  }
+
   return (
     <div
       className={`relative isolate h-full min-h-0 ${proposalPresentation ? "overflow-hidden" : "overflow-y-auto"}`}
@@ -503,7 +645,11 @@ export default function ClientWorkspace() {
     >
       {!proposalPresentation && <ParticleConstellation />}
       {proposalPresentation && proposalHtml ? (
-        <ProposalTemplateRenderer html={proposalHtml} variant="background" />
+        <ProposalTemplateRenderer
+          html={proposalHtml}
+          variant="background"
+          onProposalInteraction={handleProposalInteraction}
+        />
       ) : (
         <>
       <div className="relative z-10 flex min-h-full">
@@ -573,6 +719,15 @@ export default function ClientWorkspace() {
       ) : null}
         </>
       )}
+      {authed && !proposalPresentation ? (
+        <ClientSessionHistoryRail
+          sessions={sessionSummaries}
+          activeSessionId={sessionId}
+          loading={sessionsLoading}
+          composerOpen={composerOpen}
+          onSelect={(id) => void activateSession(id)}
+        />
+      ) : null}
       <div
         className={`fixed inset-x-0 z-40 flex flex-col items-center px-4 pointer-events-none ${
           proposalPresentation ? "bottom-[5.5rem]" : composerOpen ? "bottom-[7.25rem]" : "bottom-14"
@@ -619,8 +774,11 @@ export default function ClientWorkspace() {
         onToggle={() => setComposerOpen((v) => !v)}
         onSend={(text) => void onComposerSend(text)}
         onUpload={uploadFiles}
+        onNewSession={startNewSession}
         proposalMode={proposalPresentation}
         onBackFromProposal={exitProposalView}
+        showOpenProposal={sessionCompleted && !proposalPresentation}
+        onOpenProposal={() => void openProposalView()}
         leadingSlot={
           proposalPresentation ? (
             <ClientMiniVoiceOrb

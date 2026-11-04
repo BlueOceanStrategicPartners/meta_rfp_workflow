@@ -52,8 +52,8 @@ def user_model_turn_label(*, turn: int, max_turns: int) -> str:
 def user_model_error_label(detail: str) -> str:
     snippet = (detail or "").strip()[:120]
     if snippet:
-        return f"Design assistant hit a snag — try again in a moment."
-    return "Design assistant is temporarily unavailable."
+        return f"Muse Wonder hit a snag — try again in a moment."
+    return "Muse Wonder is temporarily unavailable."
 
 
 def format_user_tool_trace_summary(tool: str, result: dict[str, Any]) -> str:
@@ -128,7 +128,8 @@ _TECHNICAL_LABEL_REPLACEMENTS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"verify layout rules?", re.I), "Run quality checks"),
     (re.compile(r"search template", re.I), "Search the proposal"),
     (re.compile(r"planning agent", re.I), "Planning"),
-    (re.compile(r"executor agent", re.I), "Design agent"),
+    (re.compile(r"executor agent", re.I), "Muse Wonder"),
+    (re.compile(r"design agent", re.I), "Muse Wonder"),
     (re.compile(r"\s{2,}", re.I), " "),
 )
 

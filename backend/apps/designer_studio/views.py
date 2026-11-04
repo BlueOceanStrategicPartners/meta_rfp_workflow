@@ -296,13 +296,27 @@ class TemplateValidateView(APIView):
         html = request.data.get("html_markup") or ""
         css = request.data.get("css_stylesheet") or ""
         js = request.data.get("js_script") or ""
-        compiled = request.data.get("compiled_html") or compile_template(html, css, js_script=js)
+        auto_repair = request.data.get("auto_repair", True)
+        if isinstance(auto_repair, str):
+            auto_repair = auto_repair.strip().lower() not in ("0", "false", "no")
+        user_brief = str(request.data.get("user_brief") or "").strip()
         agent = DesignerStudioAgent()
+        if auto_repair:
+            review = agent.validate_and_repair(
+                html_markup=html,
+                css_stylesheet=css,
+                js_script=js,
+                user_brief=user_brief or "Check template — fix all validation issues automatically.",
+            )
+            return Response(review)
+        compiled = request.data.get("compiled_html") or compile_template(html, css, js_script=js)
         review = agent.validate_layout(
             html_markup=html,
             css_stylesheet=css,
             js_script=js,
             compiled_html=compiled,
+            user_brief=user_brief,
+            deterministic_only=True,
         )
         return Response(review)
 
@@ -314,7 +328,16 @@ class TemplatePreviewView(APIView):
         html = request.data.get("html_markup") or ""
         css = request.data.get("css_stylesheet") or ""
         js = request.data.get("js_script") or ""
-        compiled = compile_template(html, css, js_script=js)
+        use_sample = request.data.get("use_sample_data", True)
+        if isinstance(use_sample, str):
+            use_sample = use_sample.strip().lower() not in ("0", "false", "no")
+        compiled = compile_template(
+            html,
+            css,
+            js_script=js,
+            cards={},
+            use_seed_if_empty=bool(use_sample),
+        )
         return Response({"compiled_html": compiled})
 
 

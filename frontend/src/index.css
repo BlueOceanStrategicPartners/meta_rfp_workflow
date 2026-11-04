@@ -50,8 +50,9 @@ html[data-theme="light"] .app-shell-header .app-nav-link-active span {
   @apply border-slate-300/80 bg-slate-100 text-slate-900 shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_4px_12px_-8px_rgba(15,23,42,0.15)];
 }
 
-html[data-theme="light"] .app-shell-header__actions .studio-icon-btn {
-  @apply border-slate-200 bg-slate-100 text-slate-700 hover:border-slate-300 hover:bg-slate-200/90;
+html[data-theme="light"] .app-shell-header__actions .studio-icon-btn,
+html[data-theme="light"] .app-shell-header__actions .studio-icon-btn--variant-default {
+  @apply border-slate-200 bg-slate-100 text-slate-700 hover:border-slate-300 hover:bg-slate-200/90 hover:text-slate-900;
 }
 
 html[data-theme="light"] .app-shell-header__brand-title {
@@ -70,8 +71,56 @@ html[data-theme="light"] .client-composer-panel {
   @apply border border-slate-200/90 bg-white/95 shadow-[0_12px_40px_-16px_rgba(15,23,42,0.25)];
 }
 
+html[data-theme="light"] .client-composer-panel--proposal {
+  @apply border-slate-200/90 bg-white;
+}
+
+html[data-theme="light"] .client-composer-proposal-open {
+  @apply border-cyan-400/80 bg-cyan-600 text-white shadow-[0_2px_10px_-4px_rgba(8,145,178,0.45)];
+}
+
+html[data-theme="light"] .client-composer-proposal-open:hover {
+  @apply bg-cyan-700;
+}
+
+html[data-theme="light"] .client-composer-back {
+  @apply border-slate-200 bg-slate-100 text-slate-700 hover:bg-slate-200/90 hover:text-slate-900;
+}
+
+html[data-theme="light"] .client-composer-voice {
+  @apply border-slate-200 bg-slate-100 text-slate-600 hover:bg-slate-200/90 hover:text-slate-800;
+}
+
+html[data-theme="light"] .client-composer-voice--active {
+  @apply border-cyan-400 bg-cyan-50 text-cyan-800;
+}
+
+html[data-theme="light"] .client-composer-voice--listening {
+  @apply border-emerald-400 bg-emerald-50 text-emerald-800;
+}
+
+html[data-theme="light"] .client-composer-voice--speaking {
+  @apply border-amber-400 bg-amber-50 text-amber-900;
+}
+
 html[data-theme="light"] .client-composer-attach {
   @apply bg-slate-100 text-slate-700 hover:bg-slate-200/80;
+}
+
+html[data-theme="light"] .client-composer-upload {
+  @apply bg-slate-100 text-slate-700 hover:bg-slate-200/80;
+}
+
+html[data-theme="light"] .client-composer-tooltip {
+  @apply border-slate-200/90 bg-white text-slate-800 shadow-[0_8px_24px_-10px_rgba(15,23,42,0.2)];
+}
+
+html[data-theme="light"] .client-composer-tooltip--top::after {
+  border-top-color: rgb(255 255 255);
+}
+
+html[data-theme="light"] .client-composer-tooltip--bottom::after {
+  border-bottom-color: rgb(255 255 255);
 }
 
 html[data-theme="light"] .client-composer-input {
@@ -187,6 +236,49 @@ html[data-theme="light"] .client-side-card {
   @apply border-slate-200/90 bg-white/95 text-slate-900 shadow-[0_8px_30px_-12px_rgba(15,23,42,0.18)];
 }
 
+html[data-theme="light"] .client-session-card {
+  box-shadow:
+    0 10px 28px -14px rgb(15 23 42 / 0.12),
+    0 0 0 1px rgb(226 232 240 / 0.9);
+}
+
+html[data-theme="light"] .client-session-card--active {
+  @apply ring-cyan-500/45;
+}
+
+html[data-theme="light"] .client-session-card--idle:hover {
+  filter: none;
+  @apply bg-slate-50;
+}
+
+html[data-theme="light"] .client-session-badge {
+  background: rgb(207 250 254 / 0.95);
+  color: rgb(14 116 144);
+  border: 1px solid rgb(103 232 249 / 0.5);
+}
+
+html[data-theme="light"] .client-session-badge--live {
+  background: rgb(254 243 199 / 0.95);
+  color: rgb(146 64 14);
+  border: 1px solid rgb(252 211 77 / 0.55);
+}
+
+html[data-theme="light"] .client-session-proposal-mini {
+  @apply border-slate-200/90 bg-white shadow-none;
+}
+
+html[data-theme="light"] .client-session-proposal-mini__footer {
+  @apply bg-transparent;
+}
+
+html[data-theme="light"] .client-session-proposal-mini__title {
+  @apply font-medium text-slate-800;
+}
+
+html[data-theme="light"] .client-session-proposal-mini__quote {
+  @apply font-semibold text-cyan-800;
+}
+
 html[data-theme="light"] .client-side-card--amber {
   @apply border-amber-400/70 ring-1 ring-amber-200/80;
 }
@@ -291,6 +383,199 @@ html[data-theme="light"] .designer-shell-light {
   @apply bg-gradient-to-br from-slate-100 via-slate-50 to-violet-50 text-slate-900;
 }
 
+/* Designer agent composer + chips — unlayered so light overrides win over @layer components */
+html[data-theme="light"] .designer-shell-light .studio-composer {
+  @apply border-slate-200/90 bg-white/90 backdrop-blur-md;
+}
+
+html[data-theme="light"] .designer-shell-light .studio-composer-unified {
+  @apply border-slate-200 bg-white shadow-[0_8px_30px_-12px_rgba(15,23,42,0.15)];
+}
+
+html[data-theme="light"] .designer-shell-light .studio-composer-unified:focus-within {
+  border-color: rgba(139, 92, 246, 0.45);
+  box-shadow:
+    0 8px 30px -12px rgba(15, 23, 42, 0.12),
+    0 0 0 1px rgba(139, 92, 246, 0.25);
+}
+
+html[data-theme="light"] .designer-shell-light .studio-composer-icons {
+  @apply border-slate-200;
+}
+
+html[data-theme="light"] .designer-shell-light .studio-composer-input {
+  @apply text-slate-900 placeholder:text-slate-400;
+}
+
+html[data-theme="light"] .designer-shell-light .studio-composer-hint {
+  @apply text-slate-500;
+}
+
+html[data-theme="light"] .designer-shell-light .studio-composer-action {
+  @apply text-slate-500 hover:bg-slate-100 hover:text-slate-800;
+}
+
+html[data-theme="light"] .designer-shell-light .studio-composer-dropzone {
+  @apply border-violet-300/60 bg-violet-50 text-slate-600;
+}
+
+html[data-theme="light"] .designer-shell-light .studio-composer-upload-row {
+  @apply text-slate-600;
+}
+
+html[data-theme="light"] .designer-shell-light .studio-suggest-chip {
+  @apply border-slate-200 bg-white text-slate-700 hover:border-violet-300 hover:bg-violet-50 hover:text-violet-900;
+}
+
+html[data-theme="light"] .designer-shell-light .studio-preview-target-chip {
+  @apply border-teal-300/90 bg-teal-50 text-teal-950;
+}
+
+html[data-theme="light"] .designer-shell-light .studio-preview-target-chip-clear {
+  @apply text-teal-800/80 hover:bg-teal-100 hover:text-teal-950;
+}
+
+html[data-theme="light"] .designer-shell-light .studio-clarify-chip {
+  @apply border-fuchsia-200 bg-fuchsia-50 text-fuchsia-900 hover:border-fuchsia-300 hover:bg-fuchsia-100;
+}
+
+html[data-theme="light"] .designer-shell-light .studio-attachment-chip {
+  @apply border-slate-200 bg-white text-slate-800;
+}
+
+html[data-theme="light"] .designer-shell-light .studio-composer-input--scroll {
+  scrollbar-color: rgba(124, 58, 237, 0.45) transparent;
+}
+
+html[data-theme="light"] .designer-shell-light .studio-composer-input--scroll::-webkit-scrollbar-track {
+  background: rgba(148, 163, 184, 0.2);
+}
+
+html[data-theme="light"] .designer-shell-light .studio-composer-input--scroll::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, rgba(124, 58, 237, 0.45), rgba(139, 92, 246, 0.35));
+  border-color: rgba(148, 163, 184, 0.35);
+}
+
+html[data-theme="light"] .designer-shell-light .studio-panel-header {
+  @apply border-slate-200/90;
+}
+
+html[data-theme="light"] .designer-shell-light .studio-panel-subtitle {
+  @apply text-slate-500;
+}
+
+html[data-theme="light"] .studio-dialog-backdrop {
+  @apply bg-slate-900/40;
+}
+
+html[data-theme="light"] .designer-shell-light.studio-dialog-panel,
+html[data-theme="light"] .designer-shell-light .studio-dialog-panel {
+  @apply border-slate-200 bg-white text-slate-900 shadow-[0_28px_60px_-20px_rgba(15,23,42,0.25)];
+}
+
+html[data-theme="light"] .designer-shell-light .studio-dialog-header,
+html[data-theme="light"] .designer-shell-light .studio-dialog-footer,
+html[data-theme="light"] .designer-shell-light .studio-dialog-compose {
+  @apply border-slate-200;
+}
+
+html[data-theme="light"] .designer-shell-light .studio-dialog-compose {
+  @apply bg-white;
+}
+
+html[data-theme="light"] .designer-shell-light .studio-dialog-title {
+  @apply text-slate-900;
+}
+
+html[data-theme="light"] .designer-shell-light .studio-dialog-subtitle {
+  @apply text-slate-500;
+}
+
+html[data-theme="light"] .designer-shell-light .studio-dialog-label {
+  @apply text-slate-500;
+}
+
+html[data-theme="light"] .designer-shell-light .studio-dialog-close-btn {
+  @apply border-slate-200 text-slate-700 hover:bg-slate-50;
+}
+
+html[data-theme="light"] .designer-shell-light .studio-dialog-error {
+  @apply bg-red-50 text-red-800;
+}
+
+html[data-theme="light"] .designer-shell-light .studio-agent-rules-empty {
+  @apply border-violet-200 bg-gradient-to-b from-violet-50 via-white to-white;
+}
+
+html[data-theme="light"] .designer-shell-light .studio-agent-rules-empty-icon {
+  @apply border-violet-200 bg-violet-100 text-violet-700 shadow-violet-200/50;
+}
+
+html[data-theme="light"] .designer-shell-light .studio-agent-rules-empty-title {
+  @apply text-slate-900;
+}
+
+html[data-theme="light"] .designer-shell-light .studio-agent-rules-empty-body,
+html[data-theme="light"] .designer-shell-light .studio-agent-rules-empty-list {
+  @apply text-slate-600;
+}
+
+html[data-theme="light"] .designer-shell-light .studio-agent-rules-empty-kicker {
+  @apply text-violet-700;
+}
+
+html[data-theme="light"] .designer-shell-light .studio-agent-rules-loading {
+  @apply border-slate-200 bg-slate-50;
+}
+
+html[data-theme="light"] .designer-shell-light .studio-agent-rules-loading-icon {
+  @apply border-slate-200 bg-white text-slate-400;
+}
+
+html[data-theme="light"] .designer-shell-light .studio-agent-rules-loading-text {
+  @apply text-slate-500;
+}
+
+html[data-theme="light"] .designer-shell-light .studio-agent-rules-item {
+  @apply border-slate-200 bg-slate-50;
+}
+
+html[data-theme="light"] .designer-shell-light .studio-agent-rules-item-body {
+  @apply text-slate-800;
+}
+
+html[data-theme="light"] .designer-shell-light .studio-agent-rules-item-index {
+  @apply text-slate-400;
+}
+
+html[data-theme="light"] .designer-shell-light .studio-agent-rules-edit {
+  @apply text-violet-700;
+}
+
+html[data-theme="light"] .designer-shell-light .studio-agent-rules-remove {
+  @apply text-red-600;
+}
+
+html[data-theme="light"] .designer-shell-light .studio-dialog-conflict {
+  @apply border-amber-300 bg-amber-50 text-amber-950;
+}
+
+html[data-theme="light"] .designer-shell-light .studio-dialog-conflict-title {
+  @apply text-amber-900;
+}
+
+html[data-theme="light"] .designer-shell-light .studio-dialog-conflict-body {
+  @apply text-slate-700;
+}
+
+html[data-theme="light"] .designer-shell-light .studio-dialog-conflict-suggest {
+  @apply bg-white text-slate-800 ring-1 ring-amber-200;
+}
+
+html[data-theme="light"] .designer-shell-light .studio-dialog-conflict-dismiss {
+  @apply border-slate-200 text-slate-600 hover:bg-slate-100;
+}
+
 html {
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 }
@@ -366,12 +651,71 @@ body {
     @apply rounded-full border border-white/10 bg-white/10;
   }
 
+  .client-composer-panel--proposal {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    @apply border-slate-200/90 bg-white shadow-[0_12px_40px_-16px_rgba(15,23,42,0.22)];
+  }
+
+  .client-composer-panel--proposal .client-composer-input {
+    @apply text-slate-900 placeholder:text-slate-500;
+  }
+
   .client-composer-attach {
     @apply bg-white/10 text-white/85;
   }
 
+  .client-composer-upload {
+    @apply bg-white/10 text-white/85 hover:bg-white/15;
+  }
+
+  .client-composer-tooltip {
+    @apply rounded-lg border border-white/15 bg-slate-900/95 px-2.5 py-1 text-[11px] font-medium tracking-wide text-white/90 shadow-[0_8px_24px_-8px_rgba(0,0,0,0.65)] backdrop-blur-sm;
+  }
+
+  .client-composer-tooltip::after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    margin-left: -4px;
+    border: 4px solid transparent;
+  }
+
+  .client-composer-tooltip--top::after {
+    bottom: -8px;
+    border-top-color: rgb(15 23 42 / 0.95);
+  }
+
+  .client-composer-tooltip--bottom::after {
+    top: -8px;
+    border-bottom-color: rgb(15 23 42 / 0.95);
+  }
+
   .client-composer-input {
     @apply text-white placeholder:text-white/35;
+  }
+
+  .client-composer-input:focus,
+  .client-composer-input:focus-visible {
+    outline: none;
+    box-shadow: none;
+  }
+
+  .client-composer-scroll .client-custom-scroll__viewport {
+    height: auto;
+    min-height: 2.5rem;
+    max-height: 15rem;
+  }
+
+  .client-composer-input--scrollable {
+    padding-right: 0.65rem;
+  }
+
+  .client-composer-scroll__track {
+    top: 0.35rem;
+    bottom: 0.35rem;
+    right: 0.2rem;
+    opacity: 0.9;
   }
 
   .client-composer-toggle {
@@ -535,17 +879,63 @@ body {
     @apply border border-white/15 text-white/85 hover:bg-white/10;
   }
 
+  .client-composer-icon-btn {
+    @apply flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition-colors;
+  }
+
+  .client-composer-voice {
+    @apply border border-transparent bg-white/10 text-white/85 hover:bg-white/15;
+  }
+
+  .client-composer-voice--active {
+    @apply border-cyan-400/45 bg-cyan-500/15 text-cyan-100;
+  }
+
+  .client-composer-voice--listening {
+    @apply border-emerald-400/50 bg-emerald-500/15 text-emerald-100;
+  }
+
+  .client-composer-voice--speaking {
+    @apply border-amber-400/45 bg-amber-500/15 text-amber-100;
+  }
+
+  .client-composer-voice__pulse {
+    background: radial-gradient(circle, rgb(34 211 238 / 0.35) 0%, transparent 70%);
+  }
+
+  .client-composer-panel--proposal .client-composer-back {
+    @apply border-slate-200 bg-slate-100 text-slate-700 hover:border-slate-300 hover:bg-slate-200/90 hover:text-slate-900;
+  }
+
+  .client-composer-panel--proposal .client-composer-voice {
+    @apply border-slate-200 bg-slate-100 text-slate-600 hover:bg-slate-200/90 hover:text-slate-800;
+  }
+
+  .client-composer-panel--proposal .client-composer-voice--active {
+    @apply border-cyan-300 bg-cyan-50 text-cyan-700;
+  }
+
+  .client-composer-panel--proposal .client-composer-voice--listening {
+    @apply border-emerald-300 bg-emerald-50 text-emerald-700;
+  }
+
+  .client-composer-panel--proposal .client-composer-voice--speaking {
+    @apply border-amber-300 bg-amber-50 text-amber-800;
+  }
+
   .client-mini-orb {
     @apply text-cyan-100/90;
   }
 
   .proposal-iframe-layer {
     pointer-events: auto;
+    background: transparent;
   }
 
   .proposal-iframe {
     display: block;
     color-scheme: normal;
+    background: transparent;
   }
 
   .client-side-select__trigger {
@@ -592,23 +982,129 @@ body {
     @apply relative min-h-0 flex-1 overflow-hidden;
   }
 
+  .client-session-rail__header {
+    margin-bottom: 0.625rem;
+  }
+
+  .client-session-rail__scroll {
+    overflow: hidden;
+    padding-inline: 0.375rem;
+  }
+
+  .client-session-rail__scroll-content {
+    padding: 0.375rem 0.5rem 1.25rem;
+  }
+
+  .client-session-card {
+    box-shadow:
+      0 10px 28px -12px rgb(0 0 0 / 0.55),
+      0 0 0 1px rgb(255 255 255 / 0.06);
+  }
+
+  .client-session-card--idle:hover {
+    filter: brightness(1.1);
+  }
+
+  .client-session-proposal-block {
+    @apply flex flex-col gap-1.5;
+  }
+
+  .client-session-proposal-mini {
+    @apply overflow-hidden rounded-md border border-cyan-500/20 bg-white shadow-[inset_0_0_0_1px_rgba(255,255,255,0.04)];
+  }
+
+  .client-session-proposal-mini__footer {
+    @apply relative z-[2] px-0.5 pb-0.5 text-left;
+  }
+
+  .client-session-proposal-mini__title {
+    @apply font-medium text-cyan-50/90;
+  }
+
+  .client-session-proposal-mini__quote {
+    @apply text-cyan-200/80;
+  }
+
+  .client-session-proposal-preview__viewport {
+    position: relative;
+    z-index: 0;
+    width: 100%;
+    height: 6.75rem;
+    overflow: hidden;
+    background: #fff;
+    line-height: 0;
+    contain: paint;
+    clip-path: inset(0);
+  }
+
+  .client-session-proposal-preview__skeleton {
+    @apply absolute inset-0 z-[2] animate-pulse bg-gradient-to-br from-slate-200/80 to-slate-100/40;
+  }
+
+  .client-session-proposal-preview__scale {
+    position: absolute;
+    top: 0;
+    left: 0;
+    z-index: 0;
+    transform-origin: top left;
+    pointer-events: none;
+    will-change: transform;
+  }
+
+  .client-session-proposal-preview__iframe {
+    display: block;
+    width: 820px;
+    height: 1060px;
+    max-width: none;
+    border: 0;
+    background: #fff;
+    pointer-events: none;
+    vertical-align: top;
+  }
+
   .client-side-deck-scroll-fade {
     pointer-events: none;
     position: absolute;
     left: 0;
     right: 0.75rem;
     z-index: 2;
-    height: 1.5rem;
+    height: 2rem;
+    opacity: 1;
+    transition: opacity 0.2s ease;
+  }
+
+  .client-session-rail .client-side-deck-scroll-fade {
+    opacity: 0;
+  }
+
+  .client-session-rail .client-side-deck-scroll-fade--visible {
+    opacity: 1;
   }
 
   .client-side-deck-scroll-fade--top {
     top: 0;
-    background: linear-gradient(to bottom, var(--client-deck-scroll-fade) 15%, transparent);
+    background: linear-gradient(to bottom, var(--client-deck-scroll-fade) 0%, transparent 100%);
   }
 
   .client-side-deck-scroll-fade--bottom {
     bottom: 0;
-    background: linear-gradient(to top, var(--client-deck-scroll-fade) 15%, transparent);
+    background: linear-gradient(to top, var(--client-deck-scroll-fade) 0%, transparent 100%);
+  }
+
+  .client-session-badge {
+    background: rgb(6 182 212 / 0.15);
+    color: rgb(165 243 252);
+  }
+
+  .client-session-badge--live {
+    background: rgb(251 191 36 / 0.12);
+    color: rgb(253 230 138);
+  }
+
+  .client-composer-proposal-open {
+    background: rgb(6 182 212 / 0.18);
+    color: rgb(165 243 252);
+    border: 1px solid rgb(6 182 212 / 0.35);
   }
 
   .client-custom-scroll {
@@ -871,6 +1367,14 @@ body {
     @apply flex max-w-full items-center gap-2 rounded-xl border border-cyan-400/35 bg-cyan-950/40 px-2.5 py-1.5 text-xs text-cyan-50;
   }
 
+  .studio-preview-target-chip-clear {
+    @apply ml-1 rounded px-1 text-cyan-100/75 transition hover:bg-cyan-500/15 hover:text-cyan-50;
+  }
+
+  .studio-clarify-chip {
+    @apply rounded-full border border-fuchsia-500/35 bg-fuchsia-600/25 px-3 py-1 text-xs text-fuchsia-100 transition hover:border-fuchsia-400/50 hover:bg-fuchsia-600/40;
+  }
+
   .studio-preview-target-action-card {
     @apply flex max-w-[18rem] items-center gap-2 rounded-lg border border-cyan-300/30 bg-slate-950/40 px-2 py-1.5 text-left;
   }
@@ -1018,6 +1522,26 @@ body {
 
   .studio-icon-btn {
     @apply inline-flex h-9 min-w-0 flex-1 items-center justify-center rounded-lg border transition-shadow duration-150;
+  }
+
+  .studio-icon-btn--variant-default {
+    @apply border-white/15 bg-white/[0.04] text-white/85 hover:border-white/25 hover:bg-white/[0.1];
+  }
+
+  .studio-icon-btn--variant-primary {
+    @apply border-emerald-500/50 bg-emerald-600/90 text-white hover:border-emerald-400 hover:bg-emerald-500;
+  }
+
+  .studio-icon-btn--variant-danger {
+    @apply border-red-500/45 bg-red-950/50 text-red-100 hover:border-red-400/60 hover:bg-red-900/55;
+  }
+
+  .studio-icon-btn--variant-accent {
+    @apply border-amber-500/45 bg-amber-950/40 text-amber-100 hover:border-amber-400/55 hover:bg-amber-900/45;
+  }
+
+  .studio-icon-btn--selected {
+    @apply border-violet-400/70 bg-violet-600 text-white shadow-[0_0_14px_-3px_rgba(139,92,246,0.75)];
   }
 
   .studio-icon-btn:focus-visible {
@@ -1433,6 +1957,26 @@ body {
     @apply border-slate-200;
   }
 
+  html[data-theme="light"] .designer-shell-light .studio-icon-btn--variant-default {
+    @apply border-slate-200 bg-white text-slate-600 hover:border-violet-300 hover:bg-violet-50 hover:text-violet-800;
+  }
+
+  html[data-theme="light"] .designer-shell-light .studio-icon-btn--variant-primary {
+    @apply border-emerald-400 bg-emerald-600 text-white hover:border-emerald-500 hover:bg-emerald-700;
+  }
+
+  html[data-theme="light"] .designer-shell-light .studio-icon-btn--variant-danger {
+    @apply border-red-200 bg-red-50 text-red-700 hover:border-red-300 hover:bg-red-100 hover:text-red-800;
+  }
+
+  html[data-theme="light"] .designer-shell-light .studio-icon-btn--variant-accent {
+    @apply border-amber-200 bg-amber-50 text-amber-900 hover:border-amber-300 hover:bg-amber-100;
+  }
+
+  html[data-theme="light"] .designer-shell-light .studio-icon-btn--selected {
+    @apply border-violet-500 bg-violet-600 text-white shadow-[0_0_12px_-3px_rgba(124,58,237,0.4)];
+  }
+
   html[data-theme="light"] .designer-shell-light .studio-agent-progress-card {
     @apply border-violet-200 bg-gradient-to-br from-violet-50 to-white text-slate-900 shadow-violet-200/40;
   }
@@ -1483,12 +2027,19 @@ body {
     @apply bg-slate-100 text-slate-800;
   }
 
-  html[data-theme="light"] .designer-shell-light .studio-preview-toolbar .studio-icon-btn {
+  html[data-theme="light"] .designer-shell-light .studio-preview-toolbar .studio-icon-btn--variant-default,
+  html[data-theme="light"] .designer-shell-light .studio-toolbar .studio-icon-btn--variant-default {
     @apply border-slate-200 bg-white text-slate-600 hover:border-violet-300 hover:bg-violet-50 hover:text-violet-800;
   }
 
-  html[data-theme="light"] .designer-shell-light .studio-toolbar .studio-icon-btn {
-    @apply border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900;
+  html[data-theme="light"] .designer-shell-light .studio-preview-toolbar .studio-icon-btn--selected,
+  html[data-theme="light"] .designer-shell-light .studio-toolbar .studio-icon-btn--selected {
+    @apply border-violet-500 bg-violet-600 text-white shadow-[0_0_12px_-3px_rgba(124,58,237,0.4)] hover:border-violet-600 hover:bg-violet-700 hover:text-white;
+  }
+
+  html[data-theme="light"] .designer-shell-light .studio-preview-toolbar .studio-icon-btn--variant-danger,
+  html[data-theme="light"] .designer-shell-light .studio-toolbar .studio-icon-btn--variant-danger {
+    @apply border-red-200 bg-red-50 text-red-700 hover:border-red-300 hover:bg-red-100;
   }
 
   html[data-theme="light"] .designer-shell-light .studio-agent-progress-card .text-violet-200\/80 {
@@ -1513,6 +2064,10 @@ body {
 
   html[data-theme="light"] .designer-shell-light .studio-live-preview-panel > header {
     @apply border-slate-200/90;
+  }
+
+  html[data-theme="light"] .designer-shell-light .studio-live-preview-panel--fullscreen > header {
+    @apply bg-white/95;
   }
 
   html[data-theme="light"] .designer-shell-light .studio-live-preview-panel > header h2 {
@@ -1595,12 +2150,188 @@ body {
     }
   }
 
+  .studio-dialog-backdrop {
+    @apply fixed inset-0 z-[120] flex items-center justify-center bg-black/60 px-4 py-[5vh] backdrop-blur-sm sm:px-6;
+  }
+
+  .studio-dialog-panel {
+    @apply flex h-[90dvh] max-h-[90dvh] min-h-0 w-full max-w-[min(100%,36rem)] flex-col rounded-2xl border border-white/10 bg-[#121828] text-white shadow-2xl sm:max-w-xl;
+  }
+
+  .studio-dialog-header {
+    @apply shrink-0 border-b border-white/10 px-4 py-3 sm:px-5;
+  }
+
+  .studio-dialog-title {
+    @apply text-sm font-semibold text-white;
+  }
+
+  .studio-dialog-subtitle {
+    @apply mt-0.5 text-xs text-white/50;
+  }
+
+  .studio-dialog-body {
+    @apply studio-scroll min-h-0 flex-1 overflow-y-auto overscroll-contain p-3 sm:p-4;
+  }
+
+  .studio-dialog-compose {
+    @apply shrink-0 border-t border-white/10 bg-[#121828] p-3 sm:p-4;
+  }
+
+  .studio-dialog-footer {
+    @apply shrink-0 border-t border-white/10 px-4 py-3 sm:px-5;
+  }
+
+  .studio-dialog-label {
+    @apply mb-1 block text-[10px] font-medium uppercase tracking-wide text-white/40;
+  }
+
+  .studio-dialog-close-btn {
+    @apply w-full rounded-lg border border-white/15 py-2 text-sm text-white/80 transition hover:bg-white/5;
+  }
+
+  .studio-dialog-error {
+    @apply rounded-lg bg-red-950/40 px-3 py-2 text-xs text-red-200;
+  }
+
+  .studio-dialog-conflict {
+    @apply rounded-xl border border-amber-400/35 bg-amber-950/25 p-3 text-xs text-amber-100;
+  }
+
+  .studio-dialog-conflict-title {
+    @apply font-semibold text-amber-200;
+  }
+
+  .studio-dialog-conflict-body {
+    @apply mt-1 text-white/80;
+  }
+
+  .studio-dialog-conflict-suggest {
+    @apply mt-2 rounded-lg bg-black/25 p-2 text-white/90;
+  }
+
+  .studio-dialog-conflict-dismiss {
+    @apply rounded-lg border border-white/15 px-2.5 py-1 text-[11px] text-white/70 hover:bg-white/5;
+  }
+
+  .studio-agent-rules-empty {
+    @apply rounded-2xl border border-dashed border-violet-400/25 bg-gradient-to-b from-violet-500/[0.08] via-transparent to-transparent px-4 py-6 text-center sm:px-5;
+  }
+
+  .studio-agent-rules-empty-icon {
+    @apply mx-auto mb-4 flex h-[3.25rem] w-[3.25rem] items-center justify-center rounded-2xl border border-violet-400/30 bg-violet-500/15 text-violet-200 shadow-[0_0_24px_-8px_rgba(139,92,246,0.55)];
+  }
+
+  .studio-agent-rules-empty-title {
+    @apply text-sm font-semibold text-white/90;
+  }
+
+  .studio-agent-rules-empty-body {
+    @apply mx-auto mt-2 max-w-[19rem] text-pretty text-xs leading-relaxed text-white/55;
+  }
+
+  .studio-agent-rules-empty-list {
+    @apply mx-auto mt-4 max-w-[17rem] space-y-1.5 text-left text-[11px] text-white/45;
+  }
+
+  .studio-agent-rules-empty-kicker {
+    @apply mt-5 text-[10px] font-medium uppercase tracking-wider text-violet-300/75;
+  }
+
+  .studio-agent-rules-loading {
+    @apply rounded-2xl border border-white/10 bg-white/[0.02] px-5 py-10 text-center;
+  }
+
+  .studio-agent-rules-loading-icon {
+    @apply mx-auto mb-3 flex h-[3.25rem] w-[3.25rem] animate-pulse items-center justify-center rounded-2xl border border-white/10 bg-white/[0.04] text-white/40;
+  }
+
+  .studio-agent-rules-loading-text {
+    @apply text-xs text-white/45;
+  }
+
+  .studio-agent-rules-item {
+    @apply rounded-xl border border-white/10 bg-white/[0.03] p-2.5;
+  }
+
+  .studio-agent-rules-item-body {
+    @apply whitespace-pre-wrap text-[11px] leading-snug text-white/85;
+  }
+
+  .studio-agent-rules-edit {
+    @apply text-violet-300 hover:underline;
+  }
+
+  .studio-agent-rules-remove {
+    @apply text-red-300 hover:underline;
+  }
+
+  .studio-agent-rules-item-index {
+    @apply text-white/30;
+  }
+
   .studio-login-shell {
     min-height: calc(100dvh - var(--app-nav-height, 4rem) - 1.5rem);
   }
 
+  .studio-login-kicker {
+    @apply text-cyan-400/80;
+  }
+
+  .studio-login-title {
+    @apply text-white;
+  }
+
+  .studio-login-subtitle {
+    @apply text-cyan-100/45;
+  }
+
+  .studio-login-label {
+    @apply text-cyan-200/50;
+  }
+
+  .studio-login-divider {
+    @apply text-cyan-100/35;
+  }
+
+  .studio-login-divider-line {
+    @apply bg-cyan-500/15;
+  }
+
+  .studio-login-error {
+    @apply border-red-500/35 bg-red-950/50 text-red-200;
+  }
+
   .studio-login-card {
     @apply rounded-2xl border border-cyan-500/20 bg-[#0c121f] p-8 shadow-[0_28px_90px_-24px_rgba(0,0,0,0.85),0_0_0_1px_rgba(34,211,238,0.06),inset_0_1px_0_rgba(34,211,238,0.1)];
+  }
+
+  html[data-theme="light"] .studio-login-kicker {
+    @apply text-cyan-700;
+  }
+
+  html[data-theme="light"] .studio-login-title {
+    @apply text-slate-900;
+  }
+
+  html[data-theme="light"] .studio-login-subtitle {
+    @apply text-slate-600;
+  }
+
+  html[data-theme="light"] .studio-login-label {
+    @apply text-slate-500;
+  }
+
+  html[data-theme="light"] .studio-login-divider {
+    @apply text-slate-500;
+  }
+
+  html[data-theme="light"] .studio-login-divider-line {
+    @apply bg-slate-200;
+  }
+
+  html[data-theme="light"] .studio-login-error {
+    @apply border-red-200 bg-red-50 text-red-800;
   }
 
   html[data-theme="light"] .studio-login-card {
@@ -1612,7 +2343,7 @@ body {
   }
 
   html[data-theme="light"] .studio-login-field {
-    @apply border-slate-200 bg-slate-50 text-slate-900 focus:border-violet-400/50 focus:ring-violet-400/20;
+    @apply border-slate-200 bg-slate-50 text-slate-900 placeholder:text-slate-400 focus:border-violet-400/50 focus:ring-violet-400/20;
   }
 
   .studio-login-primary {

@@ -1,27 +1,41 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 
+export type ScrollEdgeState = {
+  canScroll: boolean;
+  atTop: boolean;
+  atBottom: boolean;
+};
+
 type Props = {
   className?: string;
   contentClassName?: string;
   children: ReactNode;
+  onScrollEdges?: (state: ScrollEdgeState) => void;
 };
 
 const TRACK_CAP_PX = 12;
 
 /** Native scrollbar hidden; faux track with transparent top/bottom corners (theme via CSS vars). */
-export default function CustomScrollArea({ className = "", contentClassName = "", children }: Props) {
+export default function CustomScrollArea({ className = "", contentClassName = "", children, onScrollEdges }: Props) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const [metrics, setMetrics] = useState({ scrollTop: 0, scrollHeight: 0, clientHeight: 0 });
 
   const measure = useCallback(() => {
     const el = viewportRef.current;
     if (!el) return;
-    setMetrics({
-      scrollTop: el.scrollTop,
-      scrollHeight: el.scrollHeight,
-      clientHeight: el.clientHeight,
-    });
-  }, []);
+    const scrollTop = el.scrollTop;
+    const scrollHeight = el.scrollHeight;
+    const clientHeight = el.clientHeight;
+    setMetrics({ scrollTop, scrollHeight, clientHeight });
+    if (onScrollEdges) {
+      const canScroll = scrollHeight > clientHeight + 2;
+      onScrollEdges({
+        canScroll,
+        atTop: scrollTop <= 2,
+        atBottom: scrollTop + clientHeight >= scrollHeight - 2,
+      });
+    }
+  }, [onScrollEdges]);
 
   useEffect(() => {
     measure();

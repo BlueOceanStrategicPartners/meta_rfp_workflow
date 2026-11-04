@@ -215,11 +215,18 @@ def build_agent_context_block(rfp: RFPSubmission | None) -> str:
         format_turn_handoff_for_prompt(handoff),
         summarize_cards_for_agent(rfp),
     ]
-    recent = session["events"][-5:]
+    recent = session["events"][-8:]
     if recent:
         parts.append("Recent session events:")
         for ev in recent:
             parts.append(f"- [{ev.get('type')}] {ev.get('summary')}")
+        proposal_ev = [e for e in recent if str(e.get("type") or "").startswith("proposal_")]
+        if proposal_ev:
+            parts.append(
+                "Recent proposal UI actions (client full-screen proposal — treat as authoritative intent):"
+            )
+            for ev in proposal_ev[-5:]:
+                parts.append(f"- {ev.get('summary')}")
     opts = session.get("clarification_options") or []
     if opts:
         parts.append("Open clarifications: " + "; ".join(opts[:6]))

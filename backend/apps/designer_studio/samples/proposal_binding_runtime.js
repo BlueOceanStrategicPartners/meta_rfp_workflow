@@ -111,6 +111,34 @@
         el.textContent = dates.display_range;
       });
     }
+    var blocks = readBinding("binding-verified-room-blocks");
+    var summary = blocks && blocks.summary ? blocks.summary : null;
+    if (summary) {
+      if (summary.rooms_per_night != null) {
+        document.querySelectorAll(".room-block-rooms-per-night").forEach(function (el) {
+          el.textContent = String(summary.rooms_per_night);
+        });
+        var nightTotal = document.getElementById("room-night-total");
+        if (nightTotal && summary.room_nights != null) {
+          nightTotal.textContent = String(summary.room_nights);
+        }
+      }
+      if (summary.nights != null) {
+        document.querySelectorAll(".room-block-nights").forEach(function (el) {
+          el.textContent = String(summary.nights);
+        });
+      }
+      if (summary.room_nights != null) {
+        document.querySelectorAll(".room-block-room-nights").forEach(function (el) {
+          el.textContent = String(summary.room_nights);
+        });
+      }
+      if (summary.grand_total != null) {
+        document.querySelectorAll(".room-block-grand-total").forEach(function (el) {
+          el.textContent = money(summary.grand_total);
+        });
+      }
+    }
     var client = readBinding("binding-client-name");
     if (client && client.company_name) {
       document.querySelectorAll('[data-proposal-field="client_name"]').forEach(function (el) {

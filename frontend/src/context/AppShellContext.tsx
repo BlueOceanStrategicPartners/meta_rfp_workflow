@@ -25,6 +25,8 @@ type AppShellContextValue = {
   setClientProposalFullscreen: (active: boolean) => void;
   designerAuthed: boolean;
   setDesignerAuthed: (value: boolean) => void;
+  clientAuthed: boolean;
+  setClientAuthed: (value: boolean) => void;
   authBootstrapped: boolean;
 };
 
@@ -54,6 +56,7 @@ export function AppShellProvider({ children }: { children: ReactNode }) {
   const [clientSubtitlesEnabled, setClientSubtitlesEnabled] = useState(() => readStoredSubtitlesEnabled());
   const [clientProposalFullscreen, setClientProposalFullscreen] = useState(false);
   const [designerAuthed, setDesignerAuthed] = useState(false);
+  const [clientAuthed, setClientAuthed] = useState(false);
   const [authBootstrapped, setAuthBootstrapped] = useState(false);
 
   const setTheme = useCallback((next: AppTheme) => {
@@ -93,6 +96,9 @@ export function AppShellProvider({ children }: { children: ReactNode }) {
         if (!cancelled && me.authenticated && isStudioRole(me.role)) {
           setDesignerAuthed(true);
         }
+        if (!cancelled && me.authenticated && me.role === "CLIENT") {
+          setClientAuthed(true);
+        }
       } catch {
         /* not signed in */
       } finally {
@@ -115,9 +121,11 @@ export function AppShellProvider({ children }: { children: ReactNode }) {
       setClientProposalFullscreen,
       designerAuthed,
       setDesignerAuthed,
+      clientAuthed,
+      setClientAuthed,
       authBootstrapped,
     }),
-    [theme, setTheme, toggleTheme, clientSubtitlesEnabled, toggleClientSubtitles, clientProposalFullscreen, designerAuthed, authBootstrapped],
+    [theme, setTheme, toggleTheme, clientSubtitlesEnabled, toggleClientSubtitles, clientProposalFullscreen, designerAuthed, clientAuthed, authBootstrapped],
   );
 
   return <AppShellContext.Provider value={value}>{children}</AppShellContext.Provider>;

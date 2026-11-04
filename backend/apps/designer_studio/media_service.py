@@ -13,6 +13,7 @@ from apps.designer_studio.models import DesignerMediaAsset, MediaAssetType, Prop
 from apps.rfp_debate.meta_client import MetaModelAPIError, MetaModelClient
 
 from .attachment_context import format_assets_for_agent as _format_assets_for_agent
+from .muse_client import designer_agent_model_id
 
 logger = logging.getLogger(__name__)
 
@@ -120,7 +121,7 @@ def enrich_asset_metadata(asset: DesignerMediaAsset, request: HttpRequest) -> De
     client = MetaModelClient()
     try:
         raw = client.complete_json(
-            model_id=settings.META_MODEL_SPARK,
+            model_id=designer_agent_model_id(),
             system_prompt=prompt,
             user_content=user,
             fixture_kind="designer_asset_meta",

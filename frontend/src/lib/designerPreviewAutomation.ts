@@ -217,7 +217,7 @@ export async function runPreviewPanelAutomation(
 
   const srcDoc = resolvePreviewSrcDoc(iframe, previewDocFallback);
   if (!srcDoc) {
-    return fail("Live preview iframe not ready — turn on sample data or wait for preview to load.");
+    return fail("Live preview iframe not ready — wait for preview to load or check the template compiles.");
   }
 
   let probeCleanup: (() => void) | null = null;

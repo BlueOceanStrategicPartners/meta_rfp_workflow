@@ -121,6 +121,14 @@ def _group_size_from_message(lower: str) -> int | None:
     part_m = re.search(r"\b(\d+)\s*participants?\b", lower)
     if part_m:
         return int(part_m.group(1))
+    guest_m = re.search(
+        r"\b(\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|thirty|forty|fifty)\s+(?:guests?|people|attendees?|pax)\b",
+        lower,
+    )
+    if guest_m:
+        n = _word_to_int(guest_m.group(1))
+        if n:
+            return n
     if re.search(r"\bheadcount\b", lower) and "not" in lower:
         nums = _numbers_in_text(lower)
         trail = re.search(r"\b(?:it'?s?|is)\s*(\d+|twenty|thirty|forty|fifty)\s*$", lower)
@@ -132,6 +140,8 @@ def _group_size_from_message(lower: str) -> int | None:
             return nums[-1]
     if any(w in lower for w in ("headcount", "guest", "people", "attendee", "pax", "participant")):
         nums = _numbers_in_text(lower)
+        years = {int(y) for y in re.findall(r"\b(?:19|20)\d{2}\b", lower)}
+        nums = [n for n in nums if n not in years]
         if nums:
             if "not" in lower and len(nums) >= 2:
                 return nums[-1]

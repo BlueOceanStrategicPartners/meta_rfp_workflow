@@ -9,6 +9,7 @@ Use this when reviewing **compiled** preview HTML **and** source `html_markup` w
 - Every mandatory token present **exactly once** in source HTML: {{MANDATORY_PLACEHOLDERS_LIST}}.
 - Accept CTA visible at desktop: `{{cta_accept_button}}` or `.proposal-cta` not hidden via `display:none`.
 - No hardcoded guest-visible ISO dates (`YYYY-MM-DD`) when the user requested U.S. formatting — dates should flow from `{{event_dates}}` / `{{verified_room_blocks}}` only.
+- **No hardcoded sample data for any mandatory binding** in saved `html_markup`: not literal marketing date ranges, block KPIs (rooms/night, nights, room-nights), package prices, or client company names on `[data-proposal-field="…"]` or `.room-block-*` — use neutral placeholders; runtime/compile fills live RFP data (see proposal_binding_schema.md).
 - Room-block sections: dynamic numbers and row content must not contradict the binding model (no full static pricing table **without** `{{verified_room_blocks}}` in the dynamic region).
 
 ### Room block / table-specific

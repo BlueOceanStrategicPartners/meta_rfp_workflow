@@ -37,6 +37,7 @@ from .finalize_validation import (
     format_finalize_reject_message,
     run_systematic_finalize_validation,
 )
+from .muse_client import designer_agent_model_id
 from .placeholder_guidance import tool_loop_placeholder_guidance
 from .template_agent_tools import execute_template_tool, human_tool_label, tool_catalog_for_prompt
 from .template_repair_hints import format_repair_brief
@@ -717,7 +718,7 @@ class DesignerToolLoopRunner:
             else:
                 try:
                     raw = self.client.complete_json_messages(
-                        model_id=settings.META_MODEL_SPARK,
+                        model_id=designer_agent_model_id(),
                         messages=messages,
                         fixture_kind=fixture_kind,
                         allow_fixture_fallback=False,
@@ -1067,7 +1068,7 @@ class DesignerToolLoopRunner:
             {
                 "assistant_message": assistant_message,
                 "clarification_options": clarification_options,
-                "model_id": settings.META_MODEL_SPARK,
+                "model_id": designer_agent_model_id(),
                 "tool_steps": len(tool_trace),
                 "tool_turns": len({t.get("turn") for t in tool_trace if t.get("turn")}),
                 "tool_trace": tool_trace[:60],

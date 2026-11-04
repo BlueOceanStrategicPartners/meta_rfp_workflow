@@ -13,7 +13,8 @@ const REPLACEMENTS: Array<[RegExp, string]> = [
   [/verify layout rules?/gi, "Run quality checks"],
   [/search template/gi, "Search the proposal"],
   [/planning agent/gi, "Planning"],
-  [/executor agent/gi, "Design agent"],
+  [/executor agent/gi, "Muse Wonder"],
+  [/design agent/gi, "Muse Wonder"],
 ];
 
 export function normalizeDesignerProgressLabel(text: string): string {

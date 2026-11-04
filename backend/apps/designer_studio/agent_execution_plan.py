@@ -9,6 +9,8 @@ from django.conf import settings
 
 from apps.rfp_debate.meta_client import MetaModelClient
 
+from .muse_client import designer_agent_model_id
+
 logger = logging.getLogger(__name__)
 
 from .agent_task_plan import (
@@ -138,7 +140,7 @@ def try_refine_execution_plan_with_llm(
     prompt = system_prompt or EXECUTION_PLAN_SYSTEM
     try:
         raw = llm_client.complete_json_messages(
-            model_id=settings.META_MODEL_SPARK,
+            model_id=designer_agent_model_id(),
             messages=[
                 {"role": "system", "content": prompt},
                 {"role": "user", "content": user_content},

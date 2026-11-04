@@ -11,6 +11,15 @@ BASE_DIR = Path(__file__).resolve().parent.parent.parent
 load_dotenv(BASE_DIR.parent / ".env")
 load_dotenv(BASE_DIR / ".env")
 
+
+def _meta_model_id(env_key: str, default: str) -> str:
+    """Normalize legacy Muse Wonder slug to the Model API id."""
+    raw = (os.getenv(env_key, default) or default).strip()
+    if raw == "muse-wonder":
+        return "muse-wonder-1.0"
+    return raw
+
+
 SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "dev-insecure-change-in-production")
 DEBUG = os.getenv("DJANGO_DEBUG", "true").lower() == "true"
 ALLOWED_HOSTS = os.getenv("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
@@ -224,7 +233,10 @@ DESIGNER_FINALIZE_VALIDATION_ENABLED = os.getenv(
     "DESIGNER_FINALIZE_VALIDATION_ENABLED", "1"
 ).strip().lower() in ("1", "true", "yes")
 DESIGNER_FINALIZE_REJECT_MAX = int(os.getenv("DESIGNER_FINALIZE_REJECT_MAX", "3"))
-META_MODEL_WONDER = os.getenv("META_MODEL_WONDER", "muse-wonder")
+META_MODEL_WONDER = _meta_model_id("META_MODEL_WONDER", "muse-wonder-1.0")
+# Designer Panel chat agent (tool loop, repair, validation LLM, rules, media captions).
+_meta_designer = (os.getenv("META_MODEL_DESIGNER", "") or "").strip()
+META_MODEL_DESIGNER = _meta_model_id("META_MODEL_DESIGNER", _meta_designer) if _meta_designer else META_MODEL_WONDER
 USE_FIXTURE_DEBATE = os.getenv("USE_FIXTURE_DEBATE", "false").lower() == "true"
 
 # SeamlessM4T v2 — compulsory voice assistant TTS (Meta Seamless Communication)

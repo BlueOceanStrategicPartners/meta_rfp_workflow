@@ -660,7 +660,7 @@ class DesignerAgentGraph:
                 }
             result = dict(final_state.get("result") or {})
             if not result.get("assistant_message"):
-                result.setdefault("assistant_message", "Design agent finished.")
+                result.setdefault("assistant_message", "Muse Wonder finished.")
             result.setdefault("checkpoint_thread_id", thread_id)
             ckpt_id = read_latest_checkpoint_id(self._graph, config)
             if ckpt_id:

@@ -22,6 +22,24 @@ Inspect the **resolved JSON object** for each binding (after compile fills scrip
 
 **Agent rule:** Prefer **one token in a JSON script** + **empty** `[data-proposal-field="…"]` for visible copy (runtime hydrates). Legacy templates may still put tokens in headings; compile will show display text, not JSON.
 
+## Never hardcode placeholder data (saved template)
+
+Binding placeholders exist so **live RFP card data** replaces seed at compile time. The design agent must **not** paste sample or marketing numbers into saved `html_markup` as if they were real guest data.
+
+| Do not hardcode in visible HTML | Use instead |
+|---------------------------------|-------------|
+| Sample date ranges (`Nov 14 – 17, 2026`, `2026-06-01`) | `[data-proposal-field="event_dates"]` with neutral copy (`Your selected dates`, `—`) + `#binding-event-dates` JSON |
+| Sample company names (`Acme Corp`) unless user asked for static demo copy | `[data-proposal-field="client_name"]` + `#binding-client-name` |
+| Room/night KPIs (`120`, `3`, `360`) in `.room-block-rooms-per-night`, `.room-block-nights`, `.room-block-room-nights`, `#room-night-total` | Neutral `—` or `0` until runtime reads `verified_room_blocks.summary` |
+| Per-category qty/rate/totals in static room **cards** or `<tr>` rows | Empty `<tbody data-proposal-bind="verified_room_blocks">` + runtime, **or** custom `js_script` that reads `#binding-verified-room-blocks` |
+| Package prices in copy bound to `{{xgboost_quote_breakdown}}` | `[data-proposal-field="xgboost_quote_breakdown"]` or neutral “Pricing on request” until hydrate |
+
+**Allowed:** Decorative capacity text unrelated to bindings (e.g. “Ballroom seats up to 500”) — but **never** use those numbers for the **client’s block** (rooms/night, nights, grand total).
+
+**Designer preview** may show seed JSON after compile — that is not permission to save seed literals in HTML. Save-time checks flag hardcoded binding-driven numbers.
+
+---
+
 ## Default behavior (always apply unless the user explicitly asks otherwise)
 
 1. Treat every mandatory placeholder as a **JSON binding** going into  
@@ -29,7 +47,9 @@ Inspect the **resolved JSON object** for each binding (after compile fills scrip
 2. **Room block table** = **array of row objects** (`line_items`) + one **summary object** — you design `<thead>` and an **empty** `<tbody data-proposal-bind="verified_room_blocks">`; runtime fills rows.
 3. **Lists** (e.g. concessions) = JSON **`items` array** — render with your own loop in `<script>` or use `[data-proposal-field]` text hydration.
 4. Include **`proposal_binding_runtime.js`** once at the bottom of `html_markup` (or rely on compile injecting it in preview).
-5. Keep the **token literal** in source HTML exactly once; never replace tokens with sample JSON in the saved template.
+5. Include **`proposal_client_bridge.js`** once (or rely on compile injecting it for client render) so proposal clicks sync to the negotiation assistant.
+6. Wire interactive controls with **`data-proposal-action`**, **`data-proposal-mutation="section.field"`**, or **`window.rfpProposalEmit({ kind, action, label, cardPatch })`** — mutations must use card keys (`event_overview`, `room_block`, `meeting_space`, `catering_av`).
+7. Keep the **token literal** in source HTML exactly once; never replace tokens with sample JSON in the saved template.
 
 ## When the user explicitly overrides
 

@@ -4,6 +4,7 @@ from rest_framework.views import APIView
 
 from apps.accounts_rbac.permissions import IsClientRole
 
+from .client_session_list import COMPLETED_STATUSES, serialize_rfp_session_summary
 from .models import RFPSubmission, RFPStatus
 from .serializers import RFPSubmissionSerializer
 from .tasks import enqueue_debate_pipeline, run_debate_pipeline
@@ -65,6 +66,16 @@ class RFPListCreateView(generics.ListCreateAPIView):
             data["voice_intro"] = intro
         headers = self.get_success_headers(data)
         return Response(data, status=status.HTTP_201_CREATED, headers=headers)
+
+
+class RFPSessionSummariesView(APIView):
+    permission_classes = [IsClientRole]
+
+    def get(self, request):
+        rfps = RFPSubmission.objects.filter(client=request.user).order_by("-updated_at")[:50]
+        return Response(
+            {"sessions": [serialize_rfp_session_summary(r) for r in rfps]}
+        )
 
 
 class RFPDetailView(generics.RetrieveAPIView):

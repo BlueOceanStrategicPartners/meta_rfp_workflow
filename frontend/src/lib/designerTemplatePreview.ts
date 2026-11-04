@@ -24,24 +24,102 @@ const LIVE_PREVIEW_SCROLL_PORT_CSS =
 
 const LIVE_PREVIEW_NAV_GUARD_SCRIPT = `<script data-studio-live-preview-nav-guard>
 (function(){
+  var APP_PATH = /^\\/(client|designer|admin)(\\/|$)/;
+  function appPathname(path) {
+    try { return APP_PATH.test(path || ''); } catch (e) { return false; }
+  }
+  function normalizeAnchors() {
+    document.querySelectorAll('a[href]').forEach(function(el) {
+      el.setAttribute('target', '_self');
+      el.removeAttribute('rel');
+    });
+    document.querySelectorAll('form[action]').forEach(function(el) {
+      try {
+        var action = el.getAttribute('action') || '';
+        if (action.charAt(0) === '/' && appPathname(action.split('?')[0])) {
+          el.setAttribute('action', '#');
+        }
+      } catch (e) {}
+    });
+  }
+  function shouldBlockHref(href) {
+    if (!href) return false;
+    var h = href.trim();
+    if (!h || h.charAt(0) === '#') return false;
+    if (/^(mailto:|tel:|javascript:)/i.test(h)) return false;
+    if (/^https?:\\/\\//i.test(h)) {
+      try {
+        var u = new URL(h, window.location.href);
+        if (u.origin === window.top.location.origin && appPathname(u.pathname)) return true;
+      } catch (e) { return true; }
+      return false;
+    }
+    if (h.charAt(0) === '/') return true;
+    return true;
+  }
+  function onNavigateAttempt(href, e) {
+    if (!shouldBlockHref(href)) return false;
+    if (e) { e.preventDefault(); e.stopPropagation(); }
+    if (/^https?:\\/\\//i.test(href)) {
+      try { window.open(href, '_blank', 'noopener,noreferrer'); } catch (err) {}
+    }
+    return true;
+  }
   document.addEventListener('click', function(e) {
     var el = e.target && e.target.closest ? e.target.closest('a[href]') : null;
     if (!el) return;
-    var href = (el.getAttribute('href') || '').trim();
-    if (!href || href.charAt(0) === '#') return;
-    if (/^(mailto:|tel:|javascript:)/i.test(href)) return;
-    if (/^https?:\\/\\//i.test(href)) {
-      e.preventDefault();
-      window.open(href, '_blank', 'noopener,noreferrer');
-      return;
-    }
-    e.preventDefault();
+    onNavigateAttempt((el.getAttribute('href') || '').trim(), e);
   }, true);
+  document.addEventListener('submit', function(e) {
+    var form = e.target;
+    if (!form || !form.getAttribute) return;
+    var action = (form.getAttribute('action') || '').trim();
+    if (action && shouldBlockHref(action)) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  }, true);
+  try {
+    var loc = window.location;
+    var assign = loc.assign.bind(loc);
+    var replace = loc.replace.bind(loc);
+    loc.assign = function(url) {
+      if (onNavigateAttempt(String(url || ''), null)) return;
+      return assign(url);
+    };
+    loc.replace = function(url) {
+      if (onNavigateAttempt(String(url || ''), null)) return;
+      return replace(url);
+    };
+  } catch (e) {}
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', normalizeAnchors);
+  } else {
+    normalizeAnchors();
+  }
 })();
 </script>`;
 
+/** Root-relative hrefs in srcdoc resolve against the host app — rewrite to in-page anchors for preview. */
+export function sanitizePreviewDocumentLinks(doc: string): string {
+  const slugFromPath = (path: string) => {
+    const core = path.split("?")[0].split("#")[0].replace(/^\/+|\/+$/g, "") || "top";
+    return core.replace(/\//g, "-");
+  };
+  let out = doc;
+  out = out.replace(/\bhref\s*=\s*(["'])(\/[^"'#][^"']*)\1/gi, (_m, q: string, path: string) => {
+    return `href=${q}#${slugFromPath(path)}${q}`;
+  });
+  out = out.replace(/\baction\s*=\s*(["'])(\/(?:client|designer|admin)[^"']*)\1/gi, (_m, q: string) => {
+    return `action=${q}#${q}`;
+  });
+  return out;
+}
+
 export type CompilePreviewOptions = {
   thumbnail?: boolean;
+  /** When false, bindings are empty (no seed sample RFP). Default true for library thumbnails. */
+  useSampleData?: boolean;
 };
 
 function appendProposalBindingRuntime(doc: string): string {
@@ -56,7 +134,7 @@ function appendProposalBindingRuntime(doc: string): string {
 }
 
 function appendLivePreviewChrome(doc: string): string {
-  let out = doc;
+  let out = sanitizePreviewDocumentLinks(doc);
   if (!out.includes("data-studio-live-preview-chrome")) {
     const styleTag = `<style data-studio-live-preview-chrome>${LIVE_PREVIEW_SCROLL_PORT_CSS}</style>`;
     if (out.includes("</head>")) {
@@ -111,6 +189,7 @@ export function compileLocalTemplatePreview(
   js: string,
   options?: CompilePreviewOptions,
 ): string {
+  const useSampleData = options?.useSampleData !== false;
   const rawHtml = (html || "").trim();
   if (!isLegacyThreePart(css, js)) {
     let doc = rawHtml;
@@ -119,7 +198,7 @@ export function compileLocalTemplatePreview(
         '<p class="p-6 text-slate-400">Empty template — chat with the agent to design.</p>',
       );
     } else {
-      doc = compileBindingsInTemplate(doc);
+      doc = compileBindingsInTemplate(doc, useSampleData);
       if (!looksLikeFullHtmlDocument(doc)) {
         doc = wrapFragmentAsSingleFile(doc);
       } else {
@@ -143,7 +222,7 @@ export function compileLocalTemplatePreview(
     body =
       '<div style="padding:1.25rem;color:#64748b;font-family:system-ui,sans-serif;font-size:14px;">Empty template — chat with the agent to design.</div>';
   } else {
-    body = compileBindingsInTemplate(body);
+    body = compileBindingsInTemplate(body, useSampleData);
   }
   const baseShell = "html,body{font-family:system-ui,-apple-system,sans-serif;line-height:1.5;margin:0;}";
   const styleBlock = css

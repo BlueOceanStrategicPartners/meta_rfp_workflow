@@ -1,6 +1,11 @@
 import { FormEvent, ReactNode, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import BottomTriangleToggle from "./BottomTriangleToggle";
+import ComposerMultilineField, { resetComposerField } from "./ComposerMultilineField";
+import ComposerTooltip from "./ComposerTooltip";
+import { IconComposerBack, IconComposerPlus, IconComposerProposal, IconComposerUpload } from "./ClientComposerIcons";
+
+const ICON_BTN_SPRING = { type: "spring" as const, stiffness: 520, damping: 28 };
 
 function IconSend() {
   return (
@@ -18,13 +23,16 @@ type Props = {
   onToggle: () => void;
   onSend: (text: string) => void;
   onUpload: (files: FileList) => void;
+  onNewSession?: () => void;
   proposalMode?: boolean;
   onBackFromProposal?: () => void;
+  showOpenProposal?: boolean;
+  onOpenProposal?: () => void;
   leadingSlot?: ReactNode;
 };
 
-const COMPOSER_PANEL =
-  "client-composer-panel pointer-events-auto mx-auto flex w-[min(640px,calc(100vw-2rem))] items-center gap-2 rounded-full py-2 pl-3 pr-3.5 shadow-lg backdrop-blur sm:py-2.5 sm:pl-3.5 sm:pr-4";
+const COMPOSER_PANEL_BASE =
+  "client-composer-panel pointer-events-auto mx-auto flex w-[min(640px,calc(100vw-2rem))] items-end gap-2 overflow-visible rounded-[1.625rem] py-2 pl-3 pr-3.5 shadow-lg sm:py-2.5 sm:pl-3.5 sm:pr-4";
 
 /** Fixed bottom dock — same pill composer in intake and proposal (proposal adds back + mini orb). */
 export default function ComposerDock({
@@ -32,23 +40,25 @@ export default function ComposerDock({
   onToggle,
   onSend,
   onUpload,
+  onNewSession,
   proposalMode = false,
   onBackFromProposal,
+  showOpenProposal = false,
+  onOpenProposal,
   leadingSlot,
 }: Props) {
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const [hasText, setHasText] = useState(false);
 
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
-    const value = inputRef.current?.value.trim();
-    if (value) {
+    const el = inputRef.current;
+    const value = el?.value.trim();
+    if (value && el) {
       onSend(value);
-      if (inputRef.current) {
-        inputRef.current.value = "";
-        setHasText(false);
-      }
+      resetComposerField(el);
+      setHasText(false);
     }
   };
 
@@ -59,7 +69,9 @@ export default function ComposerDock({
     >
       {!proposalMode && (
         <div className="pointer-events-auto mb-1">
-          <BottomTriangleToggle open={open} onToggle={onToggle} />
+          <ComposerTooltip label={open ? "Hide composer" : "Show composer"} placement="bottom">
+            <BottomTriangleToggle open={open} onToggle={onToggle} />
+          </ComposerTooltip>
         </div>
       )}
       {(open || proposalMode) && (
@@ -67,38 +79,81 @@ export default function ComposerDock({
           initial={{ opacity: 0, y: 16 }}
           animate={{ opacity: 1, y: 0 }}
           onSubmit={handleSubmit}
-          className={COMPOSER_PANEL}
+          className={`${COMPOSER_PANEL_BASE}${proposalMode ? " client-composer-panel--proposal" : " backdrop-blur"}`}
         >
           {proposalMode && onBackFromProposal ? (
-            <motion.button
-              type="button"
-              whileHover={{ scale: 1.04 }}
-              whileTap={{ scale: 0.96 }}
-              className="client-composer-back flex h-10 shrink-0 items-center justify-center rounded-full px-3.5 text-xs font-medium"
-              aria-label="Back to summary cards"
-              onClick={onBackFromProposal}
-            >
-              Back
-            </motion.button>
+            <ComposerTooltip label="Back to summary cards">
+              <motion.button
+                type="button"
+                whileHover={{ scale: 1.06, x: -2 }}
+                whileTap={{ scale: 0.94, x: 0 }}
+                transition={ICON_BTN_SPRING}
+                className="client-composer-back client-composer-icon-btn shrink-0"
+                aria-label="Back to summary cards"
+                onClick={onBackFromProposal}
+              >
+                <motion.span
+                  className="flex items-center justify-center"
+                  whileHover={{ x: -1 }}
+                  transition={ICON_BTN_SPRING}
+                >
+                  <IconComposerBack />
+                </motion.span>
+              </motion.button>
+            </ComposerTooltip>
           ) : null}
           {leadingSlot}
+          {!proposalMode && showOpenProposal && onOpenProposal ? (
+            <ComposerTooltip label="Open proposal">
+              <motion.button
+                type="button"
+                whileHover={{ scale: 1.06 }}
+                whileTap={{ scale: 0.94 }}
+                transition={ICON_BTN_SPRING}
+                className="client-composer-proposal-open flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-full pl-2.5 pr-3 text-[11px] font-semibold uppercase tracking-wide"
+                aria-label="Open proposal"
+                onClick={onOpenProposal}
+              >
+                <IconComposerProposal />
+                <span>Proposal</span>
+              </motion.button>
+            </ComposerTooltip>
+          ) : null}
+          {!proposalMode && onNewSession ? (
+            <ComposerTooltip label="New session">
+              <motion.button
+                type="button"
+                whileHover={{ scale: 1.06 }}
+                whileTap={{ scale: 0.94 }}
+                transition={ICON_BTN_SPRING}
+                className="client-composer-attach client-composer-icon-btn shrink-0"
+                aria-label="Start new RFP session"
+                onClick={onNewSession}
+              >
+                <IconComposerPlus />
+              </motion.button>
+            </ComposerTooltip>
+          ) : null}
           {!proposalMode && (
-            <motion.button
-              type="button"
-              whileHover={{ scale: 1.04 }}
-              whileTap={{ scale: 0.96 }}
-              className="client-composer-attach flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-lg leading-none"
-              aria-label="Attach files"
-              onClick={() => fileRef.current?.click()}
-            >
-              +
-            </motion.button>
+            <ComposerTooltip label="Upload RFP file">
+              <motion.button
+                type="button"
+                whileHover={{ scale: 1.06 }}
+                whileTap={{ scale: 0.94 }}
+                transition={ICON_BTN_SPRING}
+                className="client-composer-upload client-composer-icon-btn shrink-0"
+                aria-label="Upload RFP document"
+                onClick={() => fileRef.current?.click()}
+              >
+                <IconComposerUpload />
+              </motion.button>
+            </ComposerTooltip>
           )}
-          <input
+          <ComposerMultilineField
             ref={inputRef}
-            className="client-composer-input min-h-10 flex-1 min-w-0 bg-transparent px-1 text-sm outline-none"
             placeholder={proposalMode ? "Ask about your proposal…" : "Type your RFP details…"}
-            onChange={(e) => setHasText(e.target.value.trim().length > 0)}
+            aria-label={proposalMode ? "Ask about your proposal" : "Type your RFP details"}
+            onValueChange={(value) => setHasText(value.trim().length > 0)}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
@@ -106,23 +161,25 @@ export default function ComposerDock({
               }
             }}
           />
-          <motion.button
-            type="submit"
-            disabled={!hasText}
-            aria-label="Send message"
-            className="client-composer-send group relative flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full disabled:cursor-not-allowed disabled:opacity-45"
-            whileHover={hasText ? { scale: 1.04, y: -1 } : undefined}
-            whileTap={hasText ? { scale: 0.94 } : undefined}
-            transition={{ type: "spring", stiffness: 520, damping: 28 }}
-          >
-            <span className="client-composer-send__shine pointer-events-none absolute inset-0 opacity-0 transition-opacity group-hover:opacity-100 group-disabled:opacity-0" aria-hidden />
-            <motion.span
-              className="relative flex items-center justify-center text-white"
-              animate={hasText ? { x: 0, opacity: 1 } : { x: 0, opacity: 0.85 }}
+          <ComposerTooltip label={hasText ? "Send message" : "Type a message to send"}>
+            <motion.button
+              type="submit"
+              disabled={!hasText}
+              aria-label="Send message"
+              className="client-composer-send group relative flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full disabled:cursor-not-allowed disabled:opacity-45"
+              whileHover={hasText ? { scale: 1.04, y: -1 } : undefined}
+              whileTap={hasText ? { scale: 0.94 } : undefined}
+              transition={{ type: "spring", stiffness: 520, damping: 28 }}
             >
-              <IconSend />
-            </motion.span>
-          </motion.button>
+              <span className="client-composer-send__shine pointer-events-none absolute inset-0 opacity-0 transition-opacity group-hover:opacity-100 group-disabled:opacity-0" aria-hidden />
+              <motion.span
+                className="relative flex items-center justify-center text-white"
+                animate={hasText ? { x: 0, opacity: 1 } : { x: 0, opacity: 0.85 }}
+              >
+                <IconSend />
+              </motion.span>
+            </motion.button>
+          </ComposerTooltip>
           <input
             ref={fileRef}
             type="file"

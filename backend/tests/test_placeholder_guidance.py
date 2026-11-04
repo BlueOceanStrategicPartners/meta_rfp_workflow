@@ -17,6 +17,7 @@ def test_design_agent_guidance_includes_binding_schema():
     assert "DEFAULT BEHAVIOR" in text.upper() or "Default behavior" in text
     assert "negotiated_concessions" in text
     assert "items" in text
+    assert "Never hardcode placeholder data" in text or "never hardcode" in text.lower()
 
 
 def test_guidance_files_load_and_expand_mandatory_list():
@@ -57,6 +58,35 @@ def test_collect_placeholder_binding_flags_missing_json_script():
     html = "<div>{{verified_room_blocks}}</div>"
     issues = collect_placeholder_binding_issues(html)
     assert any("application/json" in i for i in issues)
+
+
+def test_collect_placeholder_binding_flags_hardcoded_kpis_and_dates():
+    html = (
+        '<script type="application/json" id="binding-verified-room-blocks">{{verified_room_blocks}}</script>'
+        '<script type="application/json" id="binding-event-dates">{{event_dates}}</script>'
+        '<p data-proposal-field="event_dates">Nov 14 – 17, 2026</p>'
+        '<p class="text-xl font-bold room-block-rooms-per-night">120</p>'
+        '<p class="text-xl font-bold room-block-nights">3</p>'
+        "<table><tbody data-proposal-bind=\"verified_room_blocks\"></tbody></table>"
+        "<script src=\"/proposal_binding_runtime.js\"></script>"
+    )
+    issues = collect_placeholder_binding_issues(html)
+    assert any("Nov 14" in i or "marketing date" in i.lower() for i in issues)
+    assert any("room-block" in i.lower() or "120" in i for i in issues)
+    assert any("event_dates" in i for i in issues)
+
+
+def test_iso_dates_inside_json_scripts_not_flagged():
+    html = (
+        '<script type="application/json" id="binding-event-dates">'
+        '{"check_in":"2026-06-01","check_out":"2026-06-04"}'
+        "</script>"
+        '<script type="application/json" id="binding-verified-room-blocks">{{verified_room_blocks}}</script>'
+        "<table><tbody data-proposal-bind=\"verified_room_blocks\"></tbody></table>"
+        "<script src=\"/proposal_binding_runtime.js\"></script>"
+    )
+    issues = collect_placeholder_binding_issues(html)
+    assert not any("ISO dates" in i for i in issues)
 
 
 def test_deterministic_checks_include_duplicate_placeholder():

@@ -11,6 +11,7 @@ from apps.rfp_debate.meta_client import MetaModelClient
 from .template_alignment import collect_alignment_issues
 from .layout_spacing_validation import preview_automation_trailing_gap_issue
 from .placeholder_guidance import validation_placeholder_guidance
+from .muse_client import designer_agent_model_id
 
 VALIDATION_SYSTEM_PROMPT = (
     "You validate compiled hospitality proposal HTML/CSS/JS templates against the user's brief. "
@@ -116,7 +117,7 @@ def muse_validate_chat_layout(
     ]
     llm = client or MetaModelClient()
     raw = llm.complete_json_messages(
-        model_id=settings.META_MODEL_SPARK,
+        model_id=designer_agent_model_id(),
         messages=messages,
         fixture_kind="designer_validate",
     )
@@ -132,7 +133,7 @@ def muse_validate_chat_layout(
             raw.get("summary")
             or ("Template passes validation." if valid else "Template needs fixes.")
         ),
-        "model_id": settings.META_MODEL_SPARK,
+        "model_id": designer_agent_model_id(),
         "deterministic_issues": deterministic_issues,
         "muse_issues": muse_issues,
     }

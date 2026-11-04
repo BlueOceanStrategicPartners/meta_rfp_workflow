@@ -125,6 +125,33 @@ export function sampleBindingPayloads(): BindingPayloadMap {
   };
 }
 
+/** Designer preview with sample toggle off — empty bindings like client before cards exist. */
+export function emptyBindingPayloads(): BindingPayloadMap {
+  return {
+    client_name: { company_name: "" },
+    event_dates: {
+      check_in: "",
+      check_out: "",
+      display_range: "",
+      nights: 0,
+    },
+    verified_room_blocks: {
+      schema_version: 1,
+      line_items: [],
+      summary: {},
+      blocks: [],
+    },
+    meeting_space_specs: {
+      name: "",
+      seating_style: null,
+      headcount: null,
+      av: null,
+    },
+    xgboost_quote_breakdown: {},
+    negotiated_concessions: { items: [] },
+  };
+}
+
 /** JSON text for {{verified_room_blocks}} inside script#binding-verified-room-blocks */
 export function sampleVerifiedRoomBlocksJson(): string {
   return JSON.stringify(seed.verified_room_blocks);
@@ -145,11 +172,15 @@ export function samplePreviewReplacements(): Record<string, string> {
   return out;
 }
 
+const CTA_BUTTON_HTML =
+  '<button type="button" class="proposal-cta">Accept Proposal</button>';
+
 /** Compile preview with JSON in script tags and display text elsewhere. */
-export function compileBindingsInTemplate(html: string): string {
-  return substituteBindingsInHtml(html, sampleBindingPayloads()).replace(
+export function compileBindingsInTemplate(html: string, useSampleData = true): string {
+  const payloads = useSampleData ? sampleBindingPayloads() : emptyBindingPayloads();
+  return substituteBindingsInHtml(html, payloads).replace(
     "{{cta_accept_button}}",
-    '<button type="button" class="proposal-cta">Accept Proposal</button>',
+    CTA_BUTTON_HTML,
   );
 }
 

@@ -76,15 +76,15 @@ export default function StudioPortalLogin({
         transition={{ duration: 0.55, ease: EASE }}
       >
         <div className="mb-6">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-cyan-400/80">
+          <p className="studio-login-kicker text-[10px] font-semibold uppercase tracking-[0.22em]">
             Hospitality RFP Engine
           </p>
-          <h1 className="mt-2 text-2xl font-semibold tracking-tight text-white">{title}</h1>
-          <p className="mt-1.5 text-sm text-cyan-100/45">{subtitle}</p>
+          <h1 className="studio-login-title mt-2 text-2xl font-semibold tracking-tight">{title}</h1>
+          <p className="studio-login-subtitle mt-1.5 text-sm">{subtitle}</p>
         </div>
 
         {error && (
-          <p className="mb-4 rounded-lg border border-red-500/35 bg-red-950/50 px-3 py-2 text-sm text-red-200">
+          <p className="studio-login-error mb-4 rounded-lg border px-3 py-2 text-sm">
             {error}
           </p>
         )}
@@ -97,7 +97,7 @@ export default function StudioPortalLogin({
           }}
         >
           <label className="block">
-            <span className="mb-1 block text-[11px] font-medium uppercase tracking-wide text-cyan-200/50">
+            <span className="studio-login-label mb-1 block text-[11px] font-medium uppercase tracking-wide">
               Email
             </span>
             <input
@@ -110,7 +110,7 @@ export default function StudioPortalLogin({
             />
           </label>
           <label className="block">
-            <span className="mb-1 block text-[11px] font-medium uppercase tracking-wide text-cyan-200/50">
+            <span className="studio-login-label mb-1 block text-[11px] font-medium uppercase tracking-wide">
               Password
             </span>
             <input
@@ -135,9 +135,9 @@ export default function StudioPortalLogin({
         </form>
 
         <div className="my-5 flex items-center gap-3">
-          <span className="h-px flex-1 bg-cyan-500/15" aria-hidden />
-          <span className="text-[11px] font-medium uppercase tracking-wide text-cyan-100/35">Or continue with</span>
-          <span className="h-px flex-1 bg-cyan-500/15" aria-hidden />
+          <span className="studio-login-divider-line h-px flex-1" aria-hidden />
+          <span className="studio-login-divider text-[11px] font-medium uppercase tracking-wide">Or continue with</span>
+          <span className="studio-login-divider-line h-px flex-1" aria-hidden />
         </div>
 
         <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">

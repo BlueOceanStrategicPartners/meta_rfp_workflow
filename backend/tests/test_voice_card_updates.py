@@ -27,6 +27,12 @@ def test_parse_seating_style_from_voice():
     assert (patch.get("meeting_space") or {}).get("headcount") == 40
 
 
+def test_guest_count_ignores_year_in_stay_phrase():
+    patch = parse_voice_card_patch(
+        "Corporate offsite, 5 guests, arriving March 10 2026 for one night. Theater seating."
+    )
+    assert patch is not None
+    assert (patch.get("meeting_space") or {}).get("headcount") == 5
 @pytest.mark.django_db
 def test_voice_correction_updates_reply(client_user):
     rfp = RFPSubmission.objects.create(

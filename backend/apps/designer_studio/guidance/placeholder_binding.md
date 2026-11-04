@@ -4,6 +4,8 @@ Full **JSON schema knowledge** for the design agent: **`proposal_binding_schema.
 
 Mandatory tokens: {{MANDATORY_PLACEHOLDERS_LIST}}
 
+**Never hardcode placeholder data:** Do not save sample dates, company names, room counts, night counts, or dollar block totals in visible HTML for fields covered by mandatory bindings. Use JSON script tags + `[data-proposal-field="…"]` / `.room-block-*` with neutral placeholders (`—`, `Your selected dates`, `0`). See **`proposal_binding_schema.md` → “Never hardcode placeholder data”.**
+
 - Placeholders compile to **JSON** inside `<script type="application/json" id="binding-…">` — **not** pre-built HTML tables.
 - **`verified_room_blocks`**: `line_items[]` = table **rows**; `summary` = footer totals; empty `<tbody data-proposal-bind="verified_room_blocks">`.
 - **`negotiated_concessions`**: `{ "items": [ … ] }` **list**.

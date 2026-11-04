@@ -10,6 +10,8 @@ from django.conf import settings
 
 from apps.rfp_debate.meta_client import MetaModelClient
 
+from .muse_client import designer_agent_model_id
+
 from .models import DesignerAgentRule
 
 EMBED_DIM = 256
@@ -141,7 +143,7 @@ def validate_rule_conflict(
         f"Existing rules JSON:\n{catalog}"
     )
     raw = client.complete_json_messages(
-        model_id=settings.META_MODEL_SPARK,
+        model_id=designer_agent_model_id(),
         messages=[
             {"role": "system", "content": RULE_CONFLICT_SYSTEM},
             {"role": "user", "content": user_payload},

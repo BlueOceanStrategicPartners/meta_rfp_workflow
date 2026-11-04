@@ -116,9 +116,28 @@ export function useBidirectionalAgentUI(
     [],
   );
 
+  const submitProposalInteraction = useCallback((payload: Record<string, unknown>) => {
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+      setError("Connection lost — refresh and try again.");
+      return;
+    }
+    setError(null);
+    wsRef.current.send(
+      JSON.stringify({
+        type: "proposal_interaction_submit",
+        payload,
+      }),
+    );
+  }, []);
+
   const hydrateSession = useCallback((payload: Record<string, unknown>) => {
     if (payload.active_ui_cards_json) {
       setCards(payload.active_ui_cards_json as Record<string, unknown>);
+    }
+    if (payload.client_session_json && typeof payload.client_session_json === "object") {
+      setClientSession(payload.client_session_json as ClientSessionState);
+    } else if (payload.client_session && typeof payload.client_session === "object") {
+      setClientSession(payload.client_session as ClientSessionState);
     }
   }, []);
 
@@ -134,6 +153,7 @@ export function useBidirectionalAgentUI(
     error,
     submitCardMutation,
     markCardSaving,
+    submitProposalInteraction,
     setCards,
     hydrateSession,
     clearProposalHtml,

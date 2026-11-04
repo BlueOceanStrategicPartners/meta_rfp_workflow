@@ -327,24 +327,46 @@ export async function designerChat(body: {
 export async function validateTemplate(
   html_markup: string,
   css_stylesheet: string,
-  js_script: string
+  js_script: string,
+  opts?: { autoRepair?: boolean; userBrief?: string },
 ) {
   const res = await apiFetch("/api/designer/validate/", {
     method: "POST",
-    body: JSON.stringify({ html_markup, css_stylesheet, js_script }),
+    body: JSON.stringify({
+      html_markup,
+      css_stylesheet,
+      js_script,
+      auto_repair: opts?.autoRepair !== false,
+      user_brief: opts?.userBrief,
+    }),
   });
   if (!res.ok) throw new Error("Validation request failed");
-  return res.json();
+  return res.json() as Promise<{
+    valid: boolean;
+    issues?: string[];
+    summary?: string;
+    html_markup?: string;
+    css_stylesheet?: string;
+    js_script?: string;
+    repair_passes?: number;
+    repaired?: boolean;
+  }>;
 }
 
 export async function previewTemplate(
   html_markup: string,
   css_stylesheet: string,
-  js_script: string
+  js_script: string,
+  useSampleData = true,
 ) {
   const res = await apiFetch("/api/designer/preview/", {
     method: "POST",
-    body: JSON.stringify({ html_markup, css_stylesheet, js_script }),
+    body: JSON.stringify({
+      html_markup,
+      css_stylesheet,
+      js_script,
+      use_sample_data: useSampleData,
+    }),
   });
   if (!res.ok) throw new Error("Preview request failed");
   return res.json();

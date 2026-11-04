@@ -7,14 +7,11 @@ const ICON_STROKE = 1.75;
 type Variant = "default" | "primary" | "danger" | "accent";
 
 const variantClass: Record<Variant, string> = {
-  default: "border-white/15 bg-white/[0.04] text-white/85 hover:border-white/25 hover:bg-white/[0.1]",
-  primary: "border-emerald-500/50 bg-emerald-600/90 text-white hover:border-emerald-400 hover:bg-emerald-500",
-  danger: "border-red-500/45 bg-red-950/50 text-red-100 hover:border-red-400/60 hover:bg-red-900/55",
-  accent: "border-amber-500/45 bg-amber-950/40 text-amber-100 hover:border-amber-400/55 hover:bg-amber-900/45",
+  default: "studio-icon-btn--variant-default",
+  primary: "studio-icon-btn--variant-primary",
+  danger: "studio-icon-btn--variant-danger",
+  accent: "studio-icon-btn--variant-accent",
 };
-
-const selectedClass =
-  "!border-violet-400/70 !bg-violet-600 !text-white shadow-[0_0_14px_-3px_rgba(139,92,246,0.75)]";
 
 type TemplateIconButtonProps = {
   label: string;
@@ -50,7 +47,7 @@ export default function TemplateIconButton({
       whileHover={disabled ? undefined : { scale: 1.08, y: -1 }}
       whileTap={disabled ? undefined : { scale: 0.92 }}
       transition={{ type: "spring", stiffness: 520, damping: 28 }}
-      className={`studio-icon-btn ${compact || micro ? "shrink-0 !flex-none" : ""} ${micro ? "h-7 w-7 !min-h-0 !min-w-0" : compact ? "h-9 w-9 shrink-0 !flex-none" : ""} ${selected ? selectedClass : variantClass[variant]} ${active ? "ring-2 ring-amber-400/50" : ""} disabled:cursor-not-allowed disabled:opacity-40`}
+      className={`studio-icon-btn ${compact || micro ? "shrink-0 !flex-none" : ""} ${micro ? "h-7 w-7 !min-h-0 !min-w-0" : compact ? "h-9 w-9 shrink-0 !flex-none" : ""} ${selected ? "studio-icon-btn--selected" : variantClass[variant]} ${active ? "ring-2 ring-amber-400/50" : ""} disabled:cursor-not-allowed disabled:opacity-40`}
     >
       {children}
     </motion.button>

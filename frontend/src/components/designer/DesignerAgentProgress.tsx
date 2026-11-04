@@ -86,7 +86,7 @@ export default function DesignerAgentProgress({
   const headline = continuation
     ? "Some edits still need attention"
     : normalizeDesignerProgressLabel(
-        active ? "Connecting to design agent…" : "Working on your request…",
+        active ? "Connecting to Muse Wonder…" : "Working on your request…",
       );
 
   return (
@@ -112,7 +112,7 @@ export default function DesignerAgentProgress({
             )}
             <div className="min-w-0 flex-1">
             <p className="studio-progress-kicker">
-                {continuation ? "Design Agent — partial completion" : "Your to-do list"}
+                {continuation ? "Muse Wonder — partial completion" : "Your to-do list"}
               </p>
               {showHeadline ? (
                 <p className="studio-progress-headline">{headline}</p>

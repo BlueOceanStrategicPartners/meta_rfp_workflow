@@ -1,4 +1,4 @@
-"""Designer Studio — Muse Spark 1.3 for generation and validation."""
+"""Designer Studio — Muse Wonder for generation and validation."""
 from __future__ import annotations
 
 import logging
@@ -9,6 +9,7 @@ from django.conf import settings
 from apps.designer_studio.models import MANDATORY_PLACEHOLDERS
 from apps.designer_studio.services import compile_template, deterministic_template_checks
 from apps.rfp_debate.meta_client import MetaModelClient
+from .muse_client import designer_agent_model_id
 
 from .context_budget import assemble_context_prefix, trim_chat_history, trim_context_block, trim_template_fields
 from .design_agent_tool_loop import (
@@ -69,6 +70,11 @@ DESIGNER_SYSTEM_PROMPT = (
     f"Do not split css_stylesheet or js_script for new work — leave them as empty strings. "
     f"html_markup MUST include each mandatory binding token exactly once: "
     f"{', '.join(MANDATORY_PLACEHOLDERS)}. "
+    "PLACEHOLDER DATA — never hardcode: saved html_markup must NOT contain sample guest-facing "
+    "values for binding-driven fields (date ranges, company name, rooms/night, nights, block totals, "
+    "anchor/floor/target prices, per-row room qty/rates). Keep {{tokens}} in JSON scripts; use "
+    "[data-proposal-field=\"…\"] and .room-block-* with neutral copy (—, Your selected dates, 0). "
+    "Seed/sample numbers are for compile preview JSON only, not static visible text. "
     "Bindings compile to JSON — wire placeholders per proposal_binding_schema.md (script type=application/json + data-proposal-bind tbody for line_items arrays). "
     f"Optional map section: use <section class=\"venue-map-proposal\"> with .venue-map-root#venue-map — "
     f"omit the section when the user says no map. "
@@ -305,7 +311,7 @@ class DesignerStudioAgent:
         _tick(on_work_step, "understand_brief", "done")
         _tick(on_work_step, "draft_proposal", "active")
         raw = self.client.complete_json_messages(
-            model_id=settings.META_MODEL_SPARK,
+            model_id=designer_agent_model_id(),
             messages=messages,
             fixture_kind="designer_chat",
         )
@@ -341,7 +347,7 @@ class DesignerStudioAgent:
             "css_stylesheet": css,
             "js_script": js,
             "clarification_options": clarification_options,
-            "model_id": settings.META_MODEL_SPARK,
+            "model_id": designer_agent_model_id(),
         }
         return self._finalize_with_self_check(
             message=message,
@@ -500,7 +506,7 @@ class DesignerStudioAgent:
             {"role": "user", "content": brief},
         ]
         raw = self.client.complete_json_messages(
-            model_id=settings.META_MODEL_SPARK,
+            model_id=designer_agent_model_id(),
             messages=messages,
             fixture_kind="designer_chat",
         )
@@ -572,7 +578,7 @@ class DesignerStudioAgent:
             },
         ]
         raw = self.client.complete_json_messages(
-            model_id=settings.META_MODEL_SPARK,
+            model_id=designer_agent_model_id(),
             messages=messages,
             fixture_kind="designer_save_validate",
         )
@@ -599,8 +605,20 @@ class DesignerStudioAgent:
         js_script: str = "",
         compiled_html: str | None = None,
         user_brief: str = "",
+        deterministic_only: bool = False,
     ) -> dict[str, Any]:
-        from .designer_validation import muse_validate_chat_layout
+        from .designer_validation import (
+            muse_validate_chat_layout,
+            validate_template_deterministic_gate,
+        )
+
+        if deterministic_only:
+            return validate_template_deterministic_gate(
+                html=html_markup,
+                css=css_stylesheet,
+                js=js_script,
+                message=user_brief,
+            )
 
         _ = compiled_html  # compiled inside muse_validate_chat_layout
         return muse_validate_chat_layout(
@@ -610,3 +628,70 @@ class DesignerStudioAgent:
             user_brief=user_brief,
             client=self.client,
         )
+
+    def validate_and_repair(
+        self,
+        *,
+        html_markup: str,
+        css_stylesheet: str,
+        js_script: str = "",
+        user_brief: str = "Check template — fix all validation issues automatically.",
+    ) -> dict[str, Any]:
+        """Deterministic validation + tool-loop repair (Check template button)."""
+        from apps.designer_studio.proposal_bindings import ensure_client_bridge_script_tag
+
+        max_passes = max(1, int(getattr(settings, "DESIGNER_SELF_CHECK_MAX_PASSES", 4)))
+        bridged_html = ensure_client_bridge_script_tag(html_markup or "")
+        bridge_prefixed = bridged_html != (html_markup or "")
+        current: dict[str, Any] = {
+            "html_markup": bridged_html,
+            "css_stylesheet": css_stylesheet,
+            "js_script": js_script,
+            "assistant_message": "",
+        }
+        repair_passes = 0
+        deterministic_bridge_fix = bridge_prefixed
+
+        for _ in range(max_passes):
+            issues = self._collect_all_issues(user_brief, [], current)
+            if not issues:
+                summary = "Template passes validation."
+                if repair_passes:
+                    summary = f"{summary} Applied {repair_passes} automatic repair pass(es)."
+                elif deterministic_bridge_fix:
+                    summary = f"{summary} Added client proposal bridge script for live assistant sync."
+                return {
+                    "valid": True,
+                    "issues": [],
+                    "summary": summary,
+                    "html_markup": current.get("html_markup") or "",
+                    "css_stylesheet": current.get("css_stylesheet") or "",
+                    "js_script": current.get("js_script") or "",
+                    "repair_passes": repair_passes,
+                    "repaired": repair_passes > 0 or deterministic_bridge_fix,
+                    "deterministic_only": True,
+                }
+
+            current = self._repair_turn(user_brief, [], issues, current)
+            repair_passes += 1
+
+        remaining = self._collect_all_issues(user_brief, [], current)
+        valid = not remaining
+        summary = (
+            "Template passes validation after automatic repair."
+            if valid
+            else "; ".join(remaining[:6])
+        )
+        if repair_passes and valid:
+            summary = f"{summary} ({repair_passes} repair pass(es))."
+        return {
+            "valid": valid,
+            "issues": remaining,
+            "summary": summary,
+            "html_markup": current.get("html_markup") or "",
+            "css_stylesheet": current.get("css_stylesheet") or "",
+            "js_script": current.get("js_script") or "",
+            "repair_passes": repair_passes,
+            "repaired": repair_passes > 0,
+            "deterministic_only": True,
+        }

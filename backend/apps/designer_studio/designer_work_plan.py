@@ -8,6 +8,7 @@ from django.conf import settings
 from apps.rfp_debate.meta_client import MetaModelClient
 
 from .designer_map_intent import message_has_map_intent
+from .muse_client import designer_agent_model_id
 
 StepStatus = Literal["pending", "active", "done", "skipped"]
 
@@ -64,7 +65,7 @@ def personalize_plan_labels(message: str, step_ids: list[str]) -> dict[str, str]
     allowed = ", ".join(step_ids)
     try:
         raw = client.complete_json_messages(
-            model_id=settings.META_MODEL_SPARK,
+            model_id=designer_agent_model_id(),
             messages=[
                 {"role": "system", "content": PLAN_SYSTEM},
                 {
