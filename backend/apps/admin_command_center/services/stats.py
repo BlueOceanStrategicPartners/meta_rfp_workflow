@@ -97,7 +97,7 @@ def pricing_stats() -> dict:
     return {
         "quotes": total,
         "fallback_rate": _ratio(fallback, total),
-        "model_trained": pricing_services.MODEL_PATH.exists(),
+        "model_trained": pricing_services.model_status()["is_active"],
     }
 
 

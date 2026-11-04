@@ -119,12 +119,20 @@ def validate_card_mutation(session_id: str, payload: dict) -> dict:
     rfp.status = RFPStatus.PRICING
     rfp.save(update_fields=["active_ui_cards_json", "status", "updated_at"])
 
-    quote = compute_dynamic_quote(rfp)
-    cards["live_quote"] = {
-        "anchor_price": str(quote.initial_anchor_price),
-        "floor_price": str(quote.walk_away_floor_price),
-        "target_price": str(quote.optimal_target_price),
-    }
+    from apps.dynamic_pricing.services import QuoteNotPossibleError, client_quote_card
+
+    try:
+        quote = compute_dynamic_quote(rfp)
+    except QuoteNotPossibleError as exc:
+        # The edit is saved, but we never price something we can't deliver (e.g. no hall fits).
+        cards["live_quote"] = {"anchor_price": None, "note": str(exc)}
+        rfp.active_ui_cards_json = cards
+        rfp.status = RFPStatus.AWAITING_USER_CARD_EDIT
+        rfp.save(update_fields=["active_ui_cards_json", "status", "updated_at"])
+        broadcast_rfp(session_id, "cards_patch", {"cards": cards})
+        return {"ok": False, "error": str(exc), "reason": exc.reason, "alternatives": exc.alternatives}
+    # The client sees the opening offer only; floor and target stay server-side (admin only).
+    cards["live_quote"] = client_quote_card(quote)
     rfp.active_ui_cards_json = cards
     rfp.status = RFPStatus.NEGOTIATING
     append_session_event(
@@ -151,13 +159,5 @@ def validate_card_mutation(session_id: str, payload: dict) -> dict:
         {"session": rfp.client_session_json},
     )
 
-    return {
-        "ok": True,
-        "quote": {
-            "walk_away_floor_price": str(quote.walk_away_floor_price),
-            "optimal_target_price": str(quote.optimal_target_price),
-            "initial_anchor_price": str(quote.initial_anchor_price),
-            "shap": quote.shap_explanations_json,
-        },
-    }
+    return {"ok": True, "quote": client_quote_card(quote), "quote_id": str(quote.id)}
 

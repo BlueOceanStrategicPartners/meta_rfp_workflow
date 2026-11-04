@@ -80,7 +80,9 @@ class AdminOccupancySerializer(serializers.ModelSerializer):
             "revpar",
             "is_peak_season",
             "local_event_multiplier",
+            "source",
         )
+        read_only_fields = ("source",)
 
 
 class PricingPolicySerializer(serializers.ModelSerializer):

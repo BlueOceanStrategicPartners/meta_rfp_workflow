@@ -30,12 +30,11 @@ def broadcast_rfp(session_id: str, message_type: str, payload: dict) -> None:
 
 
 def _apply_quote_to_cards(rfp: RFPSubmission, quote) -> None:
+    from apps.dynamic_pricing.services import client_quote_card
+
     cards = dict(rfp.active_ui_cards_json or {})
-    cards["live_quote"] = {
-        "anchor_price": float(quote.initial_anchor_price),
-        "floor_price": float(quote.walk_away_floor_price),
-        "target_price": float(quote.optimal_target_price),
-    }
+    # The client sees the opening offer only; floor and target stay server-side (admin only).
+    cards["live_quote"] = client_quote_card(quote)
     rfp.active_ui_cards_json = cards
     rfp.status = RFPStatus.NEGOTIATING
     update_fields = ["active_ui_cards_json", "status", "updated_at"]

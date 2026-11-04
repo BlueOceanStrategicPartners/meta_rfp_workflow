@@ -34,6 +34,12 @@ def company_name(rfp: RFPSubmission) -> str:
     return overview.get("company_name") or ""
 
 
+def _fallback_label(reason: str) -> str:
+    from apps.dynamic_pricing.services import FALLBACK_REASON_LABELS
+
+    return FALLBACK_REASON_LABELS.get(reason or "", reason or "")
+
+
 def quote_to_dict(quote: DynamicPricingQuote, *, with_rfp: bool = False) -> dict:
     data = {
         "id": str(quote.id),
@@ -42,6 +48,10 @@ def quote_to_dict(quote: DynamicPricingQuote, *, with_rfp: bool = False) -> dict
         "anchor": str(quote.initial_anchor_price),
         "agreed": str(quote.agreed_final_price) if quote.agreed_final_price is not None else None,
         "used_fallback": quote.used_fallback_engine,
+        "engine": quote.engine,
+        "model_version": quote.model_version,
+        "fallback_reason": quote.fallback_reason,
+        "fallback_reason_label": _fallback_label(quote.fallback_reason),
         "created_at": quote.created_at.isoformat(),
     }
     if with_rfp:

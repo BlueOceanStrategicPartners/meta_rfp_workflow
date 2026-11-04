@@ -42,6 +42,7 @@ class Command(BaseCommand):
                     "room_occupancy_pct": 0.7 + i * 0.02,
                     "adr": 200 + i * 5,
                     "revpar": 140 + i * 4,
+                    "source": "generated",  # made-up starter rows: never train the pricing model
                 },
             )
         designer = ensure_studio_demo_user(reset_password=True)

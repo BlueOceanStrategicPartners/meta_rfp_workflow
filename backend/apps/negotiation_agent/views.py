@@ -146,7 +146,10 @@ class NegotiationOfferView(APIView):
     permission_classes = [IsClientRole]
 
     def post(self, request):
-        validate_negotiation_text(request.data.get("message", ""))
+        try:
+            validate_negotiation_text(request.data.get("message", ""))
+        except FloorPriceBreachAttemptError:
+            return Response({"ok": False, "error": "That request can't be processed."}, status=400)
         rfp = RFPSubmission.objects.get(pk=request.data["rfp_id"], client=request.user)
         quote = DynamicPricingQuote.objects.filter(rfp=rfp).order_by("-created_at").first()
         if not quote:
@@ -154,8 +157,20 @@ class NegotiationOfferView(APIView):
         offer = Decimal(str(request.data.get("offer_price", 0)))
         try:
             enforce_floor_price(offer, quote.walk_away_floor_price)
-        except FloorPriceBreachAttemptError as exc:
-            return Response({"ok": False, "error": str(exc)}, status=400)
+        except FloorPriceBreachAttemptError:
+            # Never reveal the walk-away price to the client.
+            return Response({"ok": False, "error": "That offer is below what we can accept."}, status=400)
+        from apps.admin_command_center import audit
+        from apps.dynamic_pricing.services import autonomous_limit
+
+        if offer < autonomous_limit(quote):
+            # Within the floor but beyond the agent's own discount limit: a person decides.
+            rfp.status = RFPStatus.ESCALATED
+            rfp.save(update_fields=["status", "updated_at"])
+            audit.record(None, "negotiation.escalated", "rfp", rfp.id, offer=str(offer), reason="offer_needs_approval")
+            return Response(
+                {"ok": False, "escalated": True, "detail": "A member of our team will review this offer and get back to you."}
+            )
         quote.agreed_final_price = offer
         quote.save(update_fields=["agreed_final_price"])
         return Response({"ok": True, "agreed_final_price": str(offer)})
