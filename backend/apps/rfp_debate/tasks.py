@@ -70,10 +70,20 @@ def run_debate_pipeline(rfp_id: str) -> dict:
     rfp.status = RFPStatus.EXTRACTING
     rfp.save(update_fields=["status"])
     broadcast_rfp(str(rfp.id), "debate_progress", {"status": rfp.status, "phase": "extracting"})
+    from .arbiter_orchestrator import ExtractionUnavailableError
+
     orchestrator = ArbiterOrchestrator()
     partial = False
+    unread = False
     try:
         orchestrator.run_debate(rfp)
+    except ExtractionUnavailableError as exc:
+        partial = unread = True
+        broadcast_rfp(
+            str(rfp.id),
+            "validation_error",
+            {"error": f"The AI couldn't read this request automatically ({exc.__class__.__name__}). Please add the details on the cards."},
+        )
     except MaxDebateIterationsExceededError:
         partial = True
         rfp.refresh_from_db()
@@ -87,6 +97,11 @@ def run_debate_pipeline(rfp_id: str) -> dict:
         )
 
     rfp.refresh_from_db()
+    if unread:
+        # Nothing was read: no placeholder company, no price until the client fills the cards in.
+        broadcast_rfp(str(rfp.id), "cards_patch", {"cards": rfp.active_ui_cards_json, "partial_consensus": True})
+        broadcast_rfp(str(rfp.id), "debate_progress", {"status": rfp.status, "consensus": False})
+        return {"rfp_id": str(rfp.id), "partial": True, "voice_intro": ""}
     normalize_cards_for_ui(rfp)
 
     from apps.negotiation_agent.client_session_memory import sync_clarifications_from_cards

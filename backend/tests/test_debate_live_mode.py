@@ -143,3 +143,49 @@ def test_live_critic_failure_keeps_the_room_maths_check():
     critique = CriticAgent(client=ScriptedClient([MetaModelAPIError("down")])).critique(SOURCE, extraction)
     assert [f.field_path for f in critique.discrepancy_flags] == ["total_room_nights"]
     assert critique.consensus_score == 0.0
+
+
+NO_HEADCOUNT = {k: v for k, v in DECEMBER.items() if k != "meeting_headcount"}
+
+
+@pytest.mark.django_db
+def test_critic_unavailable_only_asks_for_missing_fields(rfp):
+    """Review finding: a flag-less critique must not trigger full re-reads that overwrite the first answer."""
+    down = MetaModelAPIError("critic down")
+    arbiter, extractor = _debate(
+        [NO_HEADCOUNT, {"meeting_headcount": field(200), "company_name": field("ACME"), "check_in_date": field("2026-12-15")}],
+        [down, down],
+    )
+    arbiter.run_debate(rfp)
+    rfp.refresh_from_db()
+    overview = rfp.active_ui_cards_json["event_overview"]
+    assert overview["company_name"] == "Acme Corp" and overview["check_in_date"] == "2026-12-14"  # first answer kept
+    assert rfp.active_ui_cards_json["meeting_space"]["headcount"] == 200  # gap filled
+    assert "Re-extract only: meeting_headcount" in extractor.client.calls[1]["system_prompt"]
+
+
+@pytest.mark.django_db
+def test_room_flag_asks_for_the_nightly_blocks_too(rfp):
+    arbiter, extractor = _debate([DECEMBER, {"total_room_nights": field(170)}], [flag("total_room_nights"), AGREE])
+    arbiter.run_debate(rfp)
+    assert "room_blocks, total_room_nights" in extractor.client.calls[1]["system_prompt"]
+
+
+@pytest.mark.django_db
+def test_unreadable_request_is_locked_empty_without_placeholders_or_price(rfp):
+    from apps.rfp_debate import tasks
+
+    broken = MetaModelAPIError("bad format")
+    extractor = ExtractorAgent(client=ScriptedClient([broken, broken]))
+    critic = CriticAgent(client=ScriptedClient([]))
+    original = tasks.ArbiterOrchestrator
+    tasks.ArbiterOrchestrator = lambda: original(extractor=extractor, critic=critic)
+    try:
+        result = tasks.run_debate_pipeline(str(rfp.id))
+    finally:
+        tasks.ArbiterOrchestrator = original
+    rfp.refresh_from_db()
+    assert result["partial"] is True and rfp.status == "AWAITING_USER_CARD_EDIT"
+    assert rfp.active_ui_cards_json["event_overview"]["company_name"] is None  # no "Your organization"
+    assert "check_in_date" in rfp.amber_conflict_fields_json
+    assert rfp.pricing_quotes.count() == 0 and rfp.sla_completed_at is None
