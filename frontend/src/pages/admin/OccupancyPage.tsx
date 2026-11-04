@@ -111,15 +111,21 @@ export default function OccupancyPage() {
   const [propertyId, setPropertyId] = useAdminProperty(propsQ.data);
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
+  const [source, setSource] = useState("");
   const rangeInvalid = !!from && !!to && to < from;
 
   const rowsQ = usePolling(
     () =>
       propertyId
-        ? listOccupancy({ property: propertyId, from: from || undefined, to: rangeInvalid ? undefined : to || undefined })
+        ? listOccupancy({
+            property: propertyId,
+            from: from || undefined,
+            to: rangeInvalid ? undefined : to || undefined,
+            source: source || undefined,
+          })
         : Promise.resolve([] as OccupancyRow[]),
     0,
-    [propertyId, from, to, rangeInvalid],
+    [propertyId, from, to, rangeInvalid, source],
   );
   const dbQ = usePolling(getDbSummary, 0);
 
@@ -318,6 +324,21 @@ export default function OccupancyPage() {
                 </h3>
                 <div className="flex flex-wrap items-end gap-2">
                   <label className="block">
+                    <span className="admin-label">Source</span>
+                    <select
+                      id="oc-source"
+                      className="studio-field !w-auto !py-2"
+                      value={source}
+                      onChange={(e) => setSource(e.target.value)}
+                    >
+                      <option value="">All sources</option>
+                      <option value="imported">Imported</option>
+                      <option value="demo">Demo</option>
+                      <option value="manual">Manual</option>
+                      <option value="generated">App-generated (not used for training)</option>
+                    </select>
+                  </label>
+                  <label className="block">
                     <span className="admin-label">From</span>
                     <input type="date" className="studio-field !py-2" value={from} onChange={(e) => setFrom(e.target.value)} />
                   </label>
@@ -325,16 +346,17 @@ export default function OccupancyPage() {
                     <span className="admin-label">To</span>
                     <input type="date" className="studio-field !py-2" value={to} onChange={(e) => setTo(e.target.value)} />
                   </label>
-                  {from || to ? (
+                  {from || to || source ? (
                     <button
                       type="button"
                       className="studio-btn-secondary admin-btn-small"
                       onClick={() => {
                         setFrom("");
                         setTo("");
+                        setSource("");
                       }}
                     >
-                      Clear dates
+                      Clear filters
                     </button>
                   ) : null}
                 </div>
@@ -353,14 +375,16 @@ export default function OccupancyPage() {
                 onRetry={() => void rowsQ.reload()}
                 errorTitle="We couldn't load occupancy."
                 empty={
-                  from || to
-                    ? "No days in this date range. Try a wider range."
+                  from || to || source
+                    ? "No days match these filters. Try another source or a wider date range."
                     : "No occupancy data yet. Upload a CSV above to get started."
                 }
                 maxHeight="28rem"
               />
               {rowsQ.data && rowsQ.data.length >= 366 ? (
-                <p className="admin-faint mt-2 text-xs">Showing the first 366 days. Use the dates to narrow it down.</p>
+                <p className="admin-faint mt-2 text-xs">
+                  Showing the most recent 366 days, newest first. Use the source or dates to find older days.
+                </p>
               ) : null}
             </section>
           </>

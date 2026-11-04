@@ -310,14 +310,23 @@ class SpaceViewSet(AdminViewSetMixin, viewsets.ModelViewSet):
 
 
 class OccupancyListView(AdminAPIView):
+    """Newest days first (what an admin just imported is what they want to check), max 366 rows."""
+
     def get(self, request):
-        qs = HistoricalOccupancy.objects.order_by("target_date")
-        if request.query_params.get("property"):
-            qs = qs.filter(property_id=request.query_params["property"])
-        if request.query_params.get("from"):
-            qs = qs.filter(target_date__gte=request.query_params["from"])
-        if request.query_params.get("to"):
-            qs = qs.filter(target_date__lte=request.query_params["to"])
+        from apps.inventory.models import OccupancySource
+
+        qs = HistoricalOccupancy.objects.order_by("-target_date")
+        params = request.query_params
+        if params.get("property"):
+            qs = qs.filter(property_id=params["property"])
+        if params.get("from"):
+            qs = qs.filter(target_date__gte=params["from"])
+        if params.get("to"):
+            qs = qs.filter(target_date__lte=params["to"])
+        if params.get("source"):
+            if params["source"] not in OccupancySource.values:
+                raise AdminInputError(f"Unknown source {params['source']!r}.")
+            qs = qs.filter(source=params["source"])
         return Response(AdminOccupancySerializer(qs[:366], many=True).data)
 
 

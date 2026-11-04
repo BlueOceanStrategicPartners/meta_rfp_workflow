@@ -594,7 +594,7 @@ export const releaseSpace = (id: string) =>
   request<Space>(`inventory/spaces/${encodeURIComponent(id)}/release/`, json("POST"));
 
 // Module 6 — Occupancy
-export const listOccupancy = (params: { property?: string; from?: string; to?: string } = {}) =>
+export const listOccupancy = (params: { property?: string; from?: string; to?: string; source?: string } = {}) =>
   request<OccupancyRow[]>("occupancy/", {}, params);
 export function uploadOccupancy(file: File, property: string) {
   const form = new FormData();
