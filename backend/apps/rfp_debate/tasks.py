@@ -83,7 +83,7 @@ def run_debate_pipeline(rfp_id: str) -> dict:
         broadcast_rfp(
             str(rfp.id),
             "validation_error",
-            {"error": f"Debate used fallback extraction: {exc.__class__.__name__}"},
+            {"error": f"The AI couldn't read this request automatically ({exc.__class__.__name__}). Please check the details on the cards."},
         )
 
     rfp.refresh_from_db()

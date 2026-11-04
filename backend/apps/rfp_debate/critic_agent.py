@@ -2,8 +2,12 @@ from __future__ import annotations
 
 from django.conf import settings
 
-from .meta_client import MetaModelClient, parse_critique
+import logging
+
+from .meta_client import MetaModelAPIError, MetaModelClient, parse_critique
 from .schemas import CritiqueResult, RFPExtractionPayload
+
+logger = logging.getLogger(__name__)
 
 
 class CriticAgent:
@@ -30,18 +34,26 @@ class CriticAgent:
                         actual=str(total),
                     )
                 )
-        raw = self.client.complete_json(
-            model_id=settings.META_MODEL_SPARK,
-            system_prompt=(
-                "Cross-examine extraction JSON against source. "
-                "Return CritiqueResult JSON with discrepancy_flags."
-            ),
-            user_content=(
-                f"CROSS-EXAMINE\nSource:\n{document_text}\n\nExtraction:\n{extraction.model_dump_json()}"
-            ),
-            fixture_kind="rfp_critique",
-        )
-        result = parse_critique(raw)
+        live = not getattr(self.client, "uses_fixtures", True)
+        try:
+            raw = self.client.complete_json(
+                model_id=settings.META_MODEL_SPARK,
+                system_prompt=(
+                    "Cross-examine extraction JSON against source. "
+                    "Return CritiqueResult JSON with discrepancy_flags."
+                ),
+                user_content=(
+                    f"CROSS-EXAMINE\nSource:\n{document_text}\n\nExtraction:\n{extraction.model_dump_json()}"
+                ),
+                fixture_kind="rfp_critique",
+                allow_fixture_fallback=not live,  # never a canned critique on a real request
+            )
+            result = parse_critique(raw)
+        except MetaModelAPIError as exc:
+            # Model critique unavailable: keep the deterministic checks only, and only agree as far
+            # as the key fields are actually present.
+            logger.warning("Critic model unavailable, using deterministic checks only: %s", exc)
+            result = CritiqueResult(discrepancy_flags=[], consensus_score=extraction.consensus_score())
         if flags:
             merged = {f.field_path: f for f in result.discrepancy_flags}
             for f in flags:
