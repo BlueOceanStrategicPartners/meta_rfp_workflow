@@ -1,5 +1,7 @@
 /** Client-side compile for library thumbnails (mirrors backend JSON binding seed). */
 import { compileBindingsInTemplate } from "./proposalBindingSamples";
+import { PROPOSAL_EMBED_SCROLL_PORT_CSS } from "./proposalEmbedScrollChrome";
+import { isolateProposalEmbedNavigation } from "./proposalPreviewNavigation";
 
 const PROPOSAL_BINDING_RUNTIME_TAG =
   '<script src="/proposal_binding_runtime.js" data-proposal-binding-runtime="1"></script>';
@@ -13,108 +15,8 @@ const THUMBNAIL_PREVIEW_SHELL_CSS =
   "display:none!important;background:transparent!important;width:0!important;height:0!important;" +
   "}";
 
-/**
- * Live preview — scroll happens on the studio shell, not inside the iframe
- * (Windows/Chromium often paints a white track on iframe scrollbars).
- */
-const LIVE_PREVIEW_SCROLL_PORT_CSS =
-  "html,body{overflow:hidden!important;height:auto!important;max-height:none!important;" +
-  "scrollbar-width:none!important;-ms-overflow-style:none!important;}" +
-  "*::-webkit-scrollbar{width:0!important;height:0!important;display:none!important;}";
-
-const LIVE_PREVIEW_NAV_GUARD_SCRIPT = `<script data-studio-live-preview-nav-guard>
-(function(){
-  var APP_PATH = /^\\/(client|designer|admin)(\\/|$)/;
-  function appPathname(path) {
-    try { return APP_PATH.test(path || ''); } catch (e) { return false; }
-  }
-  function normalizeAnchors() {
-    document.querySelectorAll('a[href]').forEach(function(el) {
-      el.setAttribute('target', '_self');
-      el.removeAttribute('rel');
-    });
-    document.querySelectorAll('form[action]').forEach(function(el) {
-      try {
-        var action = el.getAttribute('action') || '';
-        if (action.charAt(0) === '/' && appPathname(action.split('?')[0])) {
-          el.setAttribute('action', '#');
-        }
-      } catch (e) {}
-    });
-  }
-  function shouldBlockHref(href) {
-    if (!href) return false;
-    var h = href.trim();
-    if (!h || h.charAt(0) === '#') return false;
-    if (/^(mailto:|tel:|javascript:)/i.test(h)) return false;
-    if (/^https?:\\/\\//i.test(h)) {
-      try {
-        var u = new URL(h, window.location.href);
-        if (u.origin === window.top.location.origin && appPathname(u.pathname)) return true;
-      } catch (e) { return true; }
-      return false;
-    }
-    if (h.charAt(0) === '/') return true;
-    return true;
-  }
-  function onNavigateAttempt(href, e) {
-    if (!shouldBlockHref(href)) return false;
-    if (e) { e.preventDefault(); e.stopPropagation(); }
-    if (/^https?:\\/\\//i.test(href)) {
-      try { window.open(href, '_blank', 'noopener,noreferrer'); } catch (err) {}
-    }
-    return true;
-  }
-  document.addEventListener('click', function(e) {
-    var el = e.target && e.target.closest ? e.target.closest('a[href]') : null;
-    if (!el) return;
-    onNavigateAttempt((el.getAttribute('href') || '').trim(), e);
-  }, true);
-  document.addEventListener('submit', function(e) {
-    var form = e.target;
-    if (!form || !form.getAttribute) return;
-    var action = (form.getAttribute('action') || '').trim();
-    if (action && shouldBlockHref(action)) {
-      e.preventDefault();
-      e.stopPropagation();
-    }
-  }, true);
-  try {
-    var loc = window.location;
-    var assign = loc.assign.bind(loc);
-    var replace = loc.replace.bind(loc);
-    loc.assign = function(url) {
-      if (onNavigateAttempt(String(url || ''), null)) return;
-      return assign(url);
-    };
-    loc.replace = function(url) {
-      if (onNavigateAttempt(String(url || ''), null)) return;
-      return replace(url);
-    };
-  } catch (e) {}
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', normalizeAnchors);
-  } else {
-    normalizeAnchors();
-  }
-})();
-</script>`;
-
-/** Root-relative hrefs in srcdoc resolve against the host app — rewrite to in-page anchors for preview. */
-export function sanitizePreviewDocumentLinks(doc: string): string {
-  const slugFromPath = (path: string) => {
-    const core = path.split("?")[0].split("#")[0].replace(/^\/+|\/+$/g, "") || "top";
-    return core.replace(/\//g, "-");
-  };
-  let out = doc;
-  out = out.replace(/\bhref\s*=\s*(["'])(\/[^"'#][^"']*)\1/gi, (_m, q: string, path: string) => {
-    return `href=${q}#${slugFromPath(path)}${q}`;
-  });
-  out = out.replace(/\baction\s*=\s*(["'])(\/(?:client|designer|admin)[^"']*)\1/gi, (_m, q: string) => {
-    return `action=${q}#${q}`;
-  });
-  return out;
-}
+/** Live preview — scroll on the studio shell (see proposalEmbedScrollChrome). */
+const LIVE_PREVIEW_SCROLL_PORT_CSS = PROPOSAL_EMBED_SCROLL_PORT_CSS;
 
 export type CompilePreviewOptions = {
   thumbnail?: boolean;
@@ -134,20 +36,13 @@ function appendProposalBindingRuntime(doc: string): string {
 }
 
 function appendLivePreviewChrome(doc: string): string {
-  let out = sanitizePreviewDocumentLinks(doc);
+  let out = isolateProposalEmbedNavigation(doc);
   if (!out.includes("data-studio-live-preview-chrome")) {
     const styleTag = `<style data-studio-live-preview-chrome>${LIVE_PREVIEW_SCROLL_PORT_CSS}</style>`;
     if (out.includes("</head>")) {
       out = out.replace("</head>", `${styleTag}</head>`);
     } else {
       out = `${styleTag}${out}`;
-    }
-  }
-  if (!out.includes("data-studio-live-preview-nav-guard")) {
-    if (out.includes("</body>")) {
-      out = out.replace("</body>", `${LIVE_PREVIEW_NAV_GUARD_SCRIPT}</body>`);
-    } else {
-      out = `${out}${LIVE_PREVIEW_NAV_GUARD_SCRIPT}`;
     }
   }
   return out;

@@ -1,9 +1,7 @@
 import { useEffect, useState, type RefObject } from "react";
+import { PROPOSAL_EMBED_SCROLL_PORT_CSS } from "../lib/proposalEmbedScrollChrome";
 
-const SCROLL_PORT_STYLE =
-  "html,body{overflow:hidden!important;height:auto!important;max-height:none!important;" +
-  "scrollbar-width:none!important;-ms-overflow-style:none!important;}" +
-  "*::-webkit-scrollbar{width:0!important;height:0!important;display:none!important;}";
+const SCROLL_PORT_STYLE = PROPOSAL_EMBED_SCROLL_PORT_CSS;
 
 function injectScrollPortStyle(doc: Document) {
   if (doc.querySelector("[data-studio-scroll-port]")) return;

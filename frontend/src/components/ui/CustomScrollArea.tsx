@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 
 export type ScrollEdgeState = {
   canScroll: boolean;
@@ -11,12 +11,20 @@ type Props = {
   contentClassName?: string;
   children: ReactNode;
   onScrollEdges?: (state: ScrollEdgeState) => void;
+  /** Optional ref to the scrolling viewport (for programmatic scroll, e.g. proposal section nav). */
+  viewportRef?: RefObject<HTMLDivElement | null>;
 };
 
 const TRACK_CAP_PX = 12;
 
 /** Native scrollbar hidden; faux track with transparent top/bottom corners (theme via CSS vars). */
-export default function CustomScrollArea({ className = "", contentClassName = "", children, onScrollEdges }: Props) {
+export default function CustomScrollArea({
+  className = "",
+  contentClassName = "",
+  children,
+  onScrollEdges,
+  viewportRef: externalViewportRef,
+}: Props) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const [metrics, setMetrics] = useState({ scrollTop: 0, scrollHeight: 0, clientHeight: 0 });
 
@@ -52,6 +60,11 @@ export default function CustomScrollArea({ className = "", contentClassName = ""
       window.removeEventListener("resize", measure);
     };
   }, [measure, children]);
+
+  useEffect(() => {
+    if (!externalViewportRef) return;
+    externalViewportRef.current = viewportRef.current;
+  });
 
   const { scrollTop, scrollHeight, clientHeight } = metrics;
   const canScroll = scrollHeight > clientHeight + 2;

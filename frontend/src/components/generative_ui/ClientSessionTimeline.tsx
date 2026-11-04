@@ -33,7 +33,7 @@ export default function ClientSessionTimeline({ session }: Props) {
   if (events.length === 0 && transcript.length === 0) return null;
 
   return (
-    <div className="client-side-timeline px-1 pb-1">
+    <div className="client-side-card client-side-session-activity client-side-timeline shrink-0 px-3 py-2.5">
       <p className="client-side-card__kicker mb-2">Session activity</p>
       <ul className="space-y-2">
         {events.map((ev, i) => (

@@ -118,6 +118,20 @@ export default function AgentCardDeck({
         </div>
       )}
 
+      <AnimatePresence mode="popLayout">
+        <motion.div
+          key={String(quote.anchor_price || "empty")}
+          layout
+          initial={{ opacity: 0.6, scale: 0.98 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className="client-side-live-estimate client-side-card client-side-card--quote mb-2 shrink-0 px-3 py-3"
+        >
+          <p className="client-side-card__kicker">Live estimate</p>
+          <p className="mt-1 text-2xl font-semibold tracking-tight">{formatUsd(quote.anchor_price)}</p>
+          <p className="client-side-field-hint mt-1 text-[11px]">Updates automatically when you edit the cards.</p>
+        </motion.div>
+      </AnimatePresence>
+
       <div className="client-side-deck-scroll-shell relative min-h-0 flex-1 overflow-hidden">
         <div className="client-side-deck-scroll-fade client-side-deck-scroll-fade--top" aria-hidden />
         <div className="client-side-deck-scroll-fade client-side-deck-scroll-fade--bottom" aria-hidden />
@@ -234,20 +248,6 @@ export default function AgentCardDeck({
           className="mt-2"
         />
       </SideCard>
-
-      <AnimatePresence mode="popLayout">
-        <motion.div
-          key={String(quote.anchor_price || "empty")}
-          layout
-          initial={{ opacity: 0.6, scale: 0.98 }}
-          animate={{ opacity: 1, scale: 1 }}
-          className="client-side-card client-side-card--quote px-3 py-3"
-        >
-          <p className="client-side-card__kicker">Live estimate</p>
-          <p className="mt-1 text-2xl font-semibold tracking-tight">{formatUsd(quote.anchor_price)}</p>
-          <p className="client-side-field-hint mt-1 text-[11px]">Updates automatically when you edit the cards.</p>
-        </motion.div>
-      </AnimatePresence>
 
       <ClientSessionTimeline session={clientSession} />
         </CustomScrollArea>
